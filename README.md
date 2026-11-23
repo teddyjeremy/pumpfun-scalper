@@ -25,7 +25,7 @@ python -m pumpbot.bot   # MODE=paper by default
 Replay the rulebook numbers: `python -m pumpbot.replay --tapes <scalp_tapes dir> --paper-tapes <paper tapes dir>`
 
 ## Verification status (Mon Nov 23–24, 2026, EAT)
-- **Unit tests:** 37 pass offline from a clean clone (fixture-dependent tests skip) (signals, guards, hard limits, risk/bankroll, instruction encoding, event decoding, config gating).
+- **Unit tests:** 32 pass + 2 skip from a clean clone (the skipped ones need the tape cache); 39 pass with local fixtures (signals, guards, hard limits, risk/bankroll, instruction encoding, event decoding, config gating).
   With the full research tape cache (`TAPES_DIR=...`), the equivalence tests also pass. Streaming features match the research
   features on 206 tapes. Engine replay reproduces all 67 research Lane B trades (Fri/Sat/Sun) exactly.
 - **Replay** (`--profile rulebook`): Fri 12 trades −$0.063, Sat 20 −$0.020, Sun 35 −$0.065. Those are the rulebook numbers.
