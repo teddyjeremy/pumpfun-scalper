@@ -130,3 +130,13 @@ the wallet, or a bigger start. Smaller stakes don't work here, because $0.0285 g
   2 SE, and ~400 to be confident. Today we have 98 survivorship-safe trades for the best rule.
 * Until then: keep Lane B as shadow-only in the paper trader, and Lane A (v1.1–v1.3) as the only rule with positive
   (in-sample) history.
+
+## Unbiased-sample test (started Mon Nov 23, 23:35 EAT) — INTERIM, in progress
+
+Status at 23:55 EAT: fetching full tapes (t0..t+430 s) for an outcome-blind stratified sample of ALL launches on
+Nov 16–22 (code `screen/v2/unbiased/`: `select.py` plan, `fetch.py` Helius gTFA, `fetch_pub.py` public RPC, `extract.py`,
+`fast.py`). Strata per day: H = SOL coins whose first 5 min show ≥15 trades and ≥$4.5k peak mcap (necessary for any entry,
+taken in full on Nov 18–22, sampled 400 on Nov 16–17); L = random 900 of the other SOL launches (incl. dead coins);
+NS = random 350 non-SOL-quoted launches. Each coin is weighted by stratum size / coins fetched, so the results are
+estimates for the whole population, including coins that died. Hard rules enforced in every variant: entry only
+t+30 s…t+300 s, every exit ≤120 s, not-a-crash, v1.1, v1.3, creator ≤8%. Numbers will be appended here.

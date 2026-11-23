@@ -43,7 +43,7 @@ class Position:
 
 class CoinEngine:
     def __init__(self, tape: Tape, cfg, lanes=None, rug_bundle: bool = True, fade: bool = False,
-                 select_from_bt: int | None = None, select_until_bt: int | None = None):
+                 select_from_bt: int | None = None, select_until_bt: int | None = None, gate=None):
         self.tape, self.cfg = tape, cfg
         self.lanes = lanes if lanes is not None else cfg.lanes
         self.rug_bundle, self.fade = rug_bundle, fade
@@ -51,12 +51,12 @@ class CoinEngine:
         self.min_t = max(HARD_MIN_ENTRY_T, int(cfg.entry_min_t))
         self.max_t = min(HARD_MAX_ENTRY_T, int(cfg.entry_max_t))
         self.sel_from, self.sel_until = select_from_bt, select_until_bt
+        self.gate = gate              # callable(info) -> (ok, reason, stake); None = always take (research replay)
         self.pending: Pending | None = None
         self.pos: Position | None = None
         self.entries = 0
         self.next_ok_bt = 0
         self.closed: list[dict] = []
-        self.blocked = False          # set by the bot when the risk layer declines (no position opened)
         self.last_eval_bt = None
 
     # ------------------------------------------------------------------ helpers
@@ -162,10 +162,11 @@ class CoinEngine:
         if tp.n and bt > tp.bt[-1] and not self.pending:
             info = self._evaluate(tp.n - 1)
             if info:
+                ok, why, stake = self.gate(info) if self.gate else (True, "ok", 1.0)
+                info["taken"], info["gate_reason"], info["stake"] = ok, why, stake
                 out.append(("signal", info))
-                if not self.blocked:
+                if ok:
                     self.pending = Pending("enter", info["sig_bt"] + FILL_DELAY, info)
-                self.blocked = False
         j = tp.append(x)
         # 2) open position: time cap first (hard <= 120s)
         if self.pos and not self.pending and bt > self.pos.ent_bt + self.hold:
@@ -207,9 +208,12 @@ class CoinEngine:
             return out
         if not self.pos and not self.pending:
             info = self._evaluate(tp.n - 1)
-            if info and not self.blocked:
-                self.pending = Pending("enter", info["sig_bt"] + FILL_DELAY, info)
+            if info:
+                ok, why, stake = self.gate(info) if self.gate else (True, "ok", 1.0)
+                info["taken"], info["gate_reason"], info["stake"] = ok, why, stake
                 out.append(("signal", info))
+                if ok:
+                    self.pending = Pending("enter", info["sig_bt"] + FILL_DELAY, info)
         if self.pending and self.pending.kind == "enter":
             out.append(self._fill(self.pending, tp.spot[-1], self.pending.target, tp.n - 1))
         if self.pos and not self.pending:

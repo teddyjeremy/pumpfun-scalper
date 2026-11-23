@@ -1,0 +1,20 @@
+[Unit]
+Description=pumpbot (Pump.fun quick-flip bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pumpbot
+WorkingDirectory=/opt/pumpbot
+EnvironmentFile=/opt/pumpbot/.env
+ExecStart=/opt/pumpbot/venv/bin/python -m pumpbot.bot
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=150
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/pumpbot/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

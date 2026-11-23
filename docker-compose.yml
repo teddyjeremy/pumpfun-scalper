@@ -1,0 +1,12 @@
+services:
+  pumpbot:
+    build: .
+    container_name: pumpbot
+    restart: unless-stopped
+    env_file: .env            # chmod 600 .env ; never commit it
+    volumes:
+      - ./data:/data
+    stop_grace_period: 150s   # lets an open position close (max hold 120s) on `docker compose stop`
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }

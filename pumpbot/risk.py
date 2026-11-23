@@ -28,7 +28,8 @@ class RiskManager:
         self.open = 0
         self.killed = False
         self.lane_hist: dict[str, deque] = defaultdict(lambda: deque(maxlen=cfg.lane_window))
-        self.lane_seed: dict[str, list] = {}
+        self.wipeouts = 0
+        self.paper_reset = False       # paper mode: after a wipeout, count it and restart the $2 wallet to keep collecting data
 
     # ---------------------------------------------------------------- state
     def new_day(self, day: str):
@@ -58,8 +59,13 @@ class RiskManager:
         """Ask before entering. Returns (ok, reason, stake_usd). Consumes a 'skip' slot when skipping."""
         self.new_day(day)
         if self.killed or self.wallet < self.cfg.kill_wallet_usd:
-            self.killed = True
-            return False, "kill_switch_wallet_below_min", 0.0
+            if self.paper_reset and self.open == 0:
+                self.wipeouts += 1
+                self.wallet = self.step_base = self.day_start = self.cfg.start_wallet_usd
+                self.stake = self.cfg.base_stake_usd; self.killed = False; self.streak = 0; self.skip = 0
+            else:
+                self.killed = True
+                return False, "kill_switch_wallet_below_min", 0.0
         if self.open >= 1:
             return False, "one_position_at_a_time", 0.0
         if self.day_trades >= self.cfg.max_trades_per_day:
@@ -97,7 +103,7 @@ class RiskManager:
     def state(self) -> dict:
         return {"wallet": round(self.wallet, 4), "stake_next": self.stake_for_next(), "day": self.day,
                 "day_start": round(self.day_start, 4), "day_trades": self.day_trades, "skip": self.skip,
-                "streak": self.streak, "killed": self.killed,
+                "streak": self.streak, "killed": self.killed, "wipeouts": self.wipeouts,
                 "lanes": {k: {"n": len(v), "avg": round(st.mean(v), 4) if v else None, "enabled": self.lane_enabled(k)}
                           for k, v in self.lane_hist.items()}}
 
