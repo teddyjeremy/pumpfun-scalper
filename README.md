@@ -23,3 +23,15 @@ cp .env.example .env    # fill in RPC endpoints (names only are listed)
 python -m pumpbot.bot   # MODE=paper by default
 ```
 Replay the rulebook numbers: `python -m pumpbot.replay --tapes <scalp_tapes dir> --paper-tapes <paper tapes dir>`
+
+## Verification status (Mon Nov 23–24, 2026, EAT)
+- **Unit tests:** 41 pass offline (signals, guards, hard limits, risk/bankroll, instruction encoding, event decoding, config gating).
+  With the full research tape cache (`TAPES_DIR=...`), the equivalence tests also pass. Streaming features match the research
+  features on 206 tapes. Engine replay reproduces all 67 research Lane B trades (Fri/Sat/Sun) exactly.
+- **Replay** (`--profile rulebook`): Fri 12 trades −$0.063, Sat 20 −$0.020, Sun 35 −$0.065. Those are the rulebook numbers.
+- **Paper smoke** on Sunday's cached tapes (whole bot path): 33 shadow trades at −$0.074/trade. The $2 wallet wiped out on its first trade (−81% rug drain).
+- **Live feed (paper):** decoding works on the public websocket (creates and trades seen).
+- **Program layout:** `scripts/verify_layout.py` rebuilt the accounts of real mainnet `buy_exact_quote_in_v3` (2/2) and `sell_v3`
+  (4/4: one used a non-ATA token account, which is allowed) and matched.
+- **NOT tested:** signed live execution, `MODE=simulate` against a funded wallet, Jito sending, and the live-mode wallet
+  bookkeeping. Do steps 4–5 of DEPLOY.md first.

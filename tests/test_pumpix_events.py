@@ -80,3 +80,19 @@ def test_decode_quote_trade_name_at_258_quote_at_plus37():
     assert raw[o + 37:o + 69] == bytes(Pubkey.from_string("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"))
     ev = decode_trade(raw)
     assert ev["quote_mint"].startswith("EPjF") and ev["quote_amount"] == 5_000_000 and ev["virtual_quote_reserves"] == 7_000_000_000
+
+
+def test_full_buy_and_sell_tx_compile_unsigned():
+    from solders.hash import Hash
+    from solders.message import MessageV0
+    from solders.signature import Signature
+    from solders.transaction import VersionedTransaction
+    user = Pubkey.from_string(USER)
+    buy = P.compute_budget(120_000, 200_000) + [P.create_ata_idempotent(user, user, MINT, P.TOKEN_2022),
+                                                P.buy_exact_quote_in_v3(user, MINT, 7_000_000, 1)] + [P.jito_tip(user, 1000)]
+    sell = P.compute_budget(120_000, 200_000) + [P.sell_v3(user, MINT, 10 ** 9, 1), P.close_token_account(user, MINT, P.TOKEN_2022)]
+    for ixs in (buy, sell):
+        msg = MessageV0.try_compile(user, ixs, [], Hash.default())
+        tx = VersionedTransaction.populate(msg, [Signature.default()])
+        raw = bytes(tx)
+        assert 300 < len(raw) <= 1232          # fits one Solana packet

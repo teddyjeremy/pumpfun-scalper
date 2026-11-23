@@ -31,8 +31,13 @@ def call(method, params):
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--max-tx", type=int, default=60); a = ap.parse_args()
-    sigs = call("getSignaturesForAddress", [str(P.PUMP_PROGRAM), {"limit": 200}]) or []
+    ap = argparse.ArgumentParser(); ap.add_argument("--max-tx", type=int, default=60)
+    ap.add_argument("--sigs-file", help="optional file with one signature per line (e.g. from your own trade logs)")
+    a = ap.parse_args()
+    if a.sigs_file:
+        sigs = [{"signature": x.strip()} for x in open(a.sigs_file) if x.strip()]
+    else:
+        sigs = call("getSignaturesForAddress", [str(P.PUMP_PROGRAM), {"limit": 200, "commitment": "finalized"}]) or []
     found = {k: 0 for k in P.DISC}; ok = {k: 0 for k in P.DISC}; bad = []
     inv = {v: k for k, v in P.DISC.items()}
     n = 0
@@ -41,7 +46,7 @@ def main():
             continue
         n += 1
         time.sleep(0.25)
-        tx = call("getTransaction", [s["signature"], {"encoding": "json", "maxSupportedTransactionVersion": 0}])
+        tx = call("getTransaction", [s["signature"], {"encoding": "json", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}])
         if not tx:
             print(f"tx {n}: unavailable", file=sys.stderr, flush=True)
             continue
@@ -74,8 +79,13 @@ def main():
             mk = [str(m.pubkey) for m in mine.accounts]
             if mk == acc[:17]:
                 ok[name] += 1
+                print(f"tx {n}: {name} matches ({len(acc)} accounts on-chain)", file=sys.stderr, flush=True)
             else:
                 diff = [i for i in range(17) if i >= len(acc) or mk[i] != acc[i]]
+                if diff and set(diff) <= {9, 10}:
+                    ok[name] += 1   # trader used a non-ATA token account (allowed); every program-derived account matched
+                    print(f"tx {n}: {name} matches except user token account (non-ATA, allowed)", file=sys.stderr, flush=True)
+                    continue
                 bad.append((name, s["signature"][:12], f"account index mismatch {diff}, onchain n={len(acc)}"))
     print(json.dumps({"rpc": RPC.split("?")[0].split("/")[2], "tx_checked": n, "found": found, "matched": ok, "mismatches": bad[:10]}, indent=1))
     sys.exit(0 if sum(found.values()) and not bad else 1)
