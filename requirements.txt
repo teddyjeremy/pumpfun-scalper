@@ -1,0 +1,5 @@
+aiohttp>=3.9
+websockets>=12
+base58>=2.1
+solders>=0.21
+pytest>=8

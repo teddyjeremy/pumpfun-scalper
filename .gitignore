@@ -1,0 +1,13 @@
+.env
+*.env
+data/
+fixtures/
+__pycache__/
+*.pyc
+*.jsonl
+*.json.gz
+*.csv
+*.log
+*.pkl
+*.bak*
+.pytest_cache/
