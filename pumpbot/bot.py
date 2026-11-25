@@ -28,7 +28,7 @@ class Coin:
     __slots__ = (
         "mint", "t0", "creator", "curve", "quote_mint", "fee_bps", "engine",
         "shadow", "buf", "buf_since", "symbol", "live", "completed",
-        "finalized", "capture", "recorded_tape_n",
+        "finalized", "capture", "recorded_tape_n", "raw_buf",
     )
 
     def __init__(self, ev, cfg, gate):
@@ -47,6 +47,7 @@ class Coin:
         self.finalized = False
         self.capture = False
         self.recorded_tape_n = 0
+        self.raw_buf = []
 
 
 class Bot:
@@ -114,9 +115,12 @@ class Bot:
                 if t_plus < 0 or t_plus > end_s:
                     continue
                 self.stats["trades"] += 1
-                was_capture = c.capture
                 if c.capture:
                     self.record_raw_coin_trade(c, ev, slot)
+                elif t_plus <= HARD_MAX_ENTRY_T + 5:
+                    # Keep only a temporary pre-entry buffer; discard it for coins
+                    # that never get a filled entry.
+                    c.raw_buf.append((dict(ev), slot))
                 if c.fee_bps is None:
                     c.fee_bps = (ev.get("fee_bps") or 0) + (ev.get("creator_fee_bps") or 0)
                 if ev.get("quote_mint") and ev["quote_mint"] != c.quote_mint:
@@ -139,10 +143,6 @@ class Bot:
                 self.handle(c, c.engine.on_trade(tr))
                 self.shadow_handle(c, c.shadow.on_trade(tr))
                 self.record_coin_trade(c, tr)
-                # If this trade completed the first accepted entry, capture its raw
-                # decoded fields too. Earlier priced history is flushed on activation.
-                if not was_capture and c.capture:
-                    self.record_raw_coin_trade(c, ev, slot)
             elif kind == "complete":
                 c = self.coins.get(ev["mint"])
                 if c:
@@ -188,6 +188,9 @@ class Bot:
             "mint": c.mint, "symbol": c.symbol, "event": "capture_started",
             "reason": "accepted_entry_filled", "t_plus": int(time.time()) - c.t0,
         })
+        for ev, slot in c.raw_buf:
+            self.record_raw_coin_trade(c, ev, slot)
+        c.raw_buf.clear()
         # Flush the in-memory priced tape so the capture includes pre-entry context.
         tp = c.engine.tape
         for i in range(tp.n):
