@@ -19,9 +19,9 @@ def simulate_exit_variants(trade: dict, tape_rows: list[dict], fee: float = 0.01
                            gas: float = 0.0285) -> list[dict]:
     """Compare two hypothetical sell-surge exits from the actual fill.
 
-    Fills use the first observed trade at or after trigger+1 second. If no such
-    trade exists, use the last observed price at/before that target and mark it
-    as a fallback. No-trigger outcomes are marked-to-market only, not exits.
+    Fills use the first observed trade in the engine-compatible trigger+1 to +3 second
+    window. If no trade occurs in that window, use the last observed price at/before
+    the target and mark it as a fallback. No-trigger outcomes are marked-to-market only, not exits.
     """
     entry_bt = int(trade.get("entry_bt") or 0)
     entry_px = float(trade.get("ent_px") or 0)
