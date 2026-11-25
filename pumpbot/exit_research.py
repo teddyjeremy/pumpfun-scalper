@@ -27,8 +27,8 @@ def simulate_exit_variants(trade: dict, tape_rows: list[dict], fee: float = 0.01
     entry_px = float(trade.get("ent_px") or 0)
     if not entry_bt or entry_px <= 0:
         return []
-    rows = sorted((r for r in tape_rows if int(r.get("bt", 0)) > entry_bt),
-                  key=lambda r: int(r.get("bt", 0)))
+    all_rows = sorted(tape_rows, key=lambda r: int(r.get("bt", 0)))
+    rows = [r for r in all_rows if int(r.get("bt", 0)) > entry_bt]
     if not rows:
         return []
     variants = {
@@ -41,7 +41,7 @@ def simulate_exit_variants(trade: dict, tape_rows: list[dict], fee: float = 0.01
         if bt > hard_exit_bt:
             break
         px = float(row.get("price_usd") or 0)
-        surge = bt - entry_bt >= 5 and _sell_surge(rows[:i + 1], bt)
+        surge = bt - entry_bt >= 5 and _sell_surge(all_rows, bt)
         state = variants["confirmed_sell_surge_2s"]
         if state["trigger"] is None:
             if surge:
