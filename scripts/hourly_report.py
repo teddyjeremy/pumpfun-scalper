@@ -7,8 +7,11 @@ import csv
 import json
 import os
 import statistics
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pumpbot.exit_research import simulate_exit_variants
 
 
