@@ -128,6 +128,7 @@ class Config:
         c.sell_slippage_bps = [int(x) for x in _list("SELL_SLIPPAGE_BPS", [str(x) for x in c.sell_slippage_bps])]
         c.start_wallet_usd = _f("START_WALLET_USD", c.start_wallet_usd)
         c.base_stake_usd = _f("BASE_STAKE_USD", c.base_stake_usd)
+        c.max_stake_frac = _f("MAX_STAKE_FRAC", c.max_stake_frac)
         c.max_stake_usd = min(20.0, _f("MAX_STAKE_USD", c.max_stake_usd))
         c.max_trades_per_day = min(50, _i("MAX_TRADES_PER_DAY", c.max_trades_per_day))
         c.daily_loss_cap = _f("DAILY_LOSS_CAP", c.daily_loss_cap)
