@@ -35,11 +35,11 @@ jobs:
       K_MIN_TRADES_10: "4"
       K_MIN_BUY_USD_10: "25"
       START_WALLET_USD: "10"
-      BASE_STAKE_USD: "0.25"
-      MAX_STAKE_USD: "0.25"
+      BASE_STAKE_USD: "1.00"
+      MAX_STAKE_USD: "1.00"
       MAX_STAKE_FRAC: "0.10"
       DAILY_LOSS_CAP: "0.10"
-      KILL_WALLET_USD: "9"
+      KILL_WALLET_USD: "5"
       MAX_TRADES_PER_DAY: "50"
       PAPER_RESET_AFTER_WIPEOUT: "no"
       PYTHONUNBUFFERED: "1"
@@ -48,7 +48,7 @@ jobs:
       - name: Checkout observer branch
         uses: actions/checkout@v4
         with:
-          ref: feature/helius-hourly-paper-observer
+          ref: main
 
       - name: Check Helius secret exists
         shell: bash
