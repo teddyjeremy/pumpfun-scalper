@@ -18,6 +18,14 @@ def test_lane_k_thresholds_are_configurable(monkeypatch):
     assert (c.k_buy_sell_ratio, c.k_min_trades_10, c.k_min_buy_usd_10) == (1.25, 5, 40.0)
 
 
+def test_bankroll_settings_are_loaded(monkeypatch):
+    monkeypatch.setenv("START_WALLET_USD", "10")
+    monkeypatch.setenv("BASE_STAKE_USD", "0.25")
+    monkeypatch.setenv("MAX_STAKE_FRAC", "0.10")
+    c = Config.from_env()
+    assert (c.start_wallet_usd, c.base_stake_usd, c.max_stake_frac) == (10.0, 0.25, 0.10)
+
+
 def test_live_needs_all_gates(monkeypatch):
     monkeypatch.setenv("MODE", "live")
     monkeypatch.delenv("I_UNDERSTAND_RISK", raising=False)
