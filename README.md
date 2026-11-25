@@ -36,7 +36,7 @@ Replay the rulebook numbers: `python -m pumpbot.replay --tapes <scalp_tapes dir>
 3. The workflow runs tests, connects to Helius mainnet WebSocket + HTTP RPC, starts `MODE=paper`, stops after the selected duration, and uploads `data/` plus `report/hourly_report.md` and `report/hourly_report.json` as a workflow artifact.
 4. Download the artifact from the completed Actions run. The report lists profitable completed signals rejected by the bankroll/risk gate and compares Lane K/B shadow performance.
 
-This is paper-only: the workflow does not provide a private key, set `MODE=live`, or send transactions. It caps simulated stake at $0.25, sets a 10% daily loss limit and a $1.50 wallet kill threshold, and disables paper-wallet resets after a wipeout. The missed list is limited to signals rejected by risk controls; coins that never triggered K/B are not yet counted. One hour is an initial diagnostic sample, not a profitability test.
+This is paper-only: the workflow does not provide a private key, set `MODE=live`, or send transactions. It caps simulated stake at $0.25, sets a 10% daily loss limit and a $9 wallet kill threshold, and disables paper-wallet resets after a wipeout. The missed list is limited to signals rejected by risk controls; coins that never triggered K/B are not yet counted. One hour is an initial diagnostic sample, not a profitability test.
 
 ## Verification status (Mon Nov 23–24, 2026, EAT)
 - **Unit tests:** 32 pass + 2 skip from a clean clone (the skipped ones need the tape cache); 39 pass with local fixtures (signals, guards, hard limits, risk/bankroll, instruction encoding, event decoding, config gating).
