@@ -38,7 +38,7 @@ jobs:
       BASE_STAKE_USD: "0.25"
       MAX_STAKE_USD: "0.25"
       DAILY_LOSS_CAP: "0.10"
-      KILL_WALLET_USD: "1.50"
+      KILL_WALLET_USD: "9"
       MAX_TRADES_PER_DAY: "50"
       PAPER_RESET_AFTER_WIPEOUT: "no"
       PYTHONUNBUFFERED: "1"
