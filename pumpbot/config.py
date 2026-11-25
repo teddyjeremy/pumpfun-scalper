@@ -1,10 +1,9 @@
 """Configuration from environment variables. Secrets are read by NAME only and never logged.
 
 MODE:
-  paper     (default) live feed, simulated fills at the next trade >= trigger+1s (same as the research).
-  simulate  live feed + builds real pump.fun transactions and calls simulateTransaction (unsigned,
-            sigVerify=false). Needs SIM_WALLET_PUBKEY (a public key only). Never sends anything.
-  live      real money. Requires MODE=live AND I_UNDERSTAND_RISK=yes AND WALLET_PRIVATE_KEY set.
+  paper     (default) live feed, simulated fills at the next trade >= trigger+1s.
+  simulate  live feed + unsigned simulateTransaction; never sends transactions.
+  live      real money; requires explicit risk acknowledgement and burner wallet.
 """
 from __future__ import annotations
 
@@ -41,10 +40,9 @@ SECRET_ENV_NAMES = ("WALLET_PRIVATE_KEY", "RPC_HTTP_URL", "FEED_WS_URLS", "SEND_
 
 
 def redact(s: str) -> str:
-    """Remove anything that looks like a key/token from a string before logging (URLs keep host only)."""
     import re
-    s = re.sub(r"(api[-_]?key=)[^&\s\"']+", r"\1***", s, flags=re.I)
-    s = re.sub(r"(https?|wss?)://([^/\s\"']+)/[^\s\"']*", r"\1://\2/***", s)
+    s = re.sub(r"(api[-_]?key=)[^&\\s\\\"']+", r"\\1***", s, flags=re.I)
+    s = re.sub(r"(https?|wss?)://([^/\\s\\\"']+)/[^\\s\\\"']*", r"\\1://\\2/***", s)
     for n in SECRET_ENV_NAMES:
         v = os.environ.get(n)
         if v and len(v) > 6:
@@ -56,37 +54,40 @@ def redact(s: str) -> str:
 class Config:
     mode: str = "paper"
     data_dir: str = "./data"
-    # ---- feed
     feed_ws_urls: list = field(default_factory=lambda: ["wss://api.mainnet-beta.solana.com"])
     rpc_http_url: str = "https://api.mainnet-beta.solana.com"
-    send_rpc_urls: list = field(default_factory=list)   # extra endpoints to broadcast to (e.g. Helius sender)
-    jito_url: str = ""                                  # e.g. https://mainnet.block-engine.jito.wtf/api/v1/transactions
+    send_rpc_urls: list = field(default_factory=list)
+    jito_url: str = ""
     jito_tip_lamports: int = 0
-    priority_micro_lamports: int = 200_000              # CU price (micro-lamports / CU)
+    priority_micro_lamports: int = 200_000
     cu_limit: int = 120_000
-    # ---- lanes
-    lanes: list = field(default_factory=lambda: ["B"])  # "B" = volume quick-flip, "A" = v1.x quality dip
-    tradeable_quotes: list = field(default_factory=lambda: ["SOL"])  # live/simulate execution quote mints
-    # ---- standing guards (Jeremy's hard rules)
+    # High-frequency lane K is evaluated first; Lane B remains a fallback.
+    lanes: list = field(default_factory=lambda: ["K", "B"])
+    tradeable_quotes: list = field(default_factory=lambda: ["SOL"])
+    # Standing guards (shared by every lane)
     entry_min_t: int = 30
     entry_max_t: int = 300
     mcap_min: float = 5_000.0
     mcap_max: float = 10_000.0
     min_cum_trades: int = 300
     creator_hold_max: float = 0.08
-    bundle_hold_max: float = 0.25        # create-slot wallets (slot0..slot0+1 buyers) still holding
-    uniq60_min: float = 0.5              # anti-wash: unique wallets / trades over 60s
-    # ---- exits
+    bundle_hold_max: float = 0.25
+    uniq60_min: float = 0.5
+    # Lane K momentum parameters
+    k_buy_sell_ratio: float = 1.0
+    k_min_trades_10: int = 4
+    k_min_buy_usd_10: float = 0.0
+    # Exits
     tp_mult: float = 1.5
-    max_hold_s: int = 90                 # hard ceiling enforced at 120 in code
+    max_hold_s: int = 90
     inval_sec: int = 60
     max_entries_per_coin: int = 2
-    # ---- execution
+    # Execution
     buy_slippage_bps: int = 1500
     sell_slippage_bps: list = field(default_factory=lambda: [3000, 6000, 9500])
     fee_rate: float = 0.0125
     gas_usd_round_trip: float = 0.0285
-    # ---- bankroll / risk
+    # Bankroll / risk
     start_wallet_usd: float = 2.0
     base_stake_usd: float = 1.0
     max_stake_frac: float = 0.35
@@ -100,7 +101,6 @@ class Config:
     lane_window: int = 100
     lane_min_trades_for_gate: int = 100
     live_require_paper_edge: bool = True
-    # ---- live safety
     i_understand_risk: bool = False
     sim_wallet_pubkey: str = ""
     telegram_chat_id: str = ""
@@ -119,8 +119,11 @@ class Config:
         c.cu_limit = _i("CU_LIMIT", c.cu_limit)
         c.lanes = [x.upper() for x in _list("LANES", c.lanes)]
         c.tradeable_quotes = _list("TRADEABLE_QUOTES", c.tradeable_quotes)
-        c.tp_mult = max(1.5, _f("TP_MULT", c.tp_mult))                 # Jeremy: TP >= 1.5x
-        c.max_hold_s = min(120, _i("MAX_HOLD_S", c.max_hold_s))       # Jeremy: exit by 120s
+        c.k_buy_sell_ratio = _f("K_BUY_SELL_RATIO", c.k_buy_sell_ratio)
+        c.k_min_trades_10 = _i("K_MIN_TRADES_10", c.k_min_trades_10)
+        c.k_min_buy_usd_10 = _f("K_MIN_BUY_USD_10", c.k_min_buy_usd_10)
+        c.tp_mult = max(1.5, _f("TP_MULT", c.tp_mult))
+        c.max_hold_s = min(120, _i("MAX_HOLD_S", c.max_hold_s))
         c.buy_slippage_bps = _i("BUY_SLIPPAGE_BPS", c.buy_slippage_bps)
         c.sell_slippage_bps = [int(x) for x in _list("SELL_SLIPPAGE_BPS", [str(x) for x in c.sell_slippage_bps])]
         c.start_wallet_usd = _f("START_WALLET_USD", c.start_wallet_usd)
@@ -136,12 +139,13 @@ class Config:
         return c
 
     def validate(self) -> list[str]:
-        """Return a list of fatal problems. Live mode is refused unless every gate is open."""
         errs = []
         if self.mode not in ("paper", "simulate", "live"):
             errs.append(f"MODE must be paper|simulate|live, got {self.mode!r}")
         if not (30 <= self.entry_min_t < self.entry_max_t <= 300):
             errs.append("entry window must stay inside t+30s..t+300s")
+        if self.k_buy_sell_ratio < 0 or self.k_min_trades_10 < 1 or self.k_min_buy_usd_10 < 0:
+            errs.append("invalid Lane K momentum thresholds")
         if self.mode == "simulate" and not self.sim_wallet_pubkey:
             errs.append("MODE=simulate needs SIM_WALLET_PUBKEY (public key only)")
         if self.mode == "live":
@@ -154,7 +158,6 @@ class Config:
         return errs
 
     def public_dict(self) -> dict:
-        """Config safe to log (URLs redacted, no secrets)."""
         d = dict(self.__dict__)
         d["feed_ws_urls"] = [redact(u) for u in self.feed_ws_urls]
         d["rpc_http_url"] = redact(self.rpc_http_url)
