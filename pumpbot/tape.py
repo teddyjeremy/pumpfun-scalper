@@ -1,12 +1,4 @@
-"""Streaming per-coin trade tape with causal features (no lookahead).
-
-This is an append-only re-implementation of research_ref/scalp_setups.build_features + win + rug_feats,
-so the live bot computes exactly what the backtests computed. tests/test_tape_equivalence.py checks
-both implementations agree on cached tapes.
-
-A trade dict needs: bt (block time, int s), t (seconds since launch), side ('buy'|'sell'), usd, spot (USD per
-token), trader, tok (token UI amount), sol (SOL or SOL-equivalent amount), slot.
-"""
+"""Streaming per-coin trade tape with causal features (no lookahead)."""
 from __future__ import annotations
 
 import bisect
@@ -82,7 +74,6 @@ class Tape:
         self._nb.append(self._nb[-1] + (1 if side_buy else 0)); self._ns.append(self._ns[-1] + (0 if side_buy else 1))
         return self.n - 1
 
-    # ------------------------------------------------------------------ windows / features at index i
     def win(self, i: int, w: int, lag: int = 0) -> dict:
         end_t = self.bt[i] - lag
         hi = bisect.bisect_right(self.bt, end_t, 0, i + 1)
@@ -125,6 +116,7 @@ class Tape:
             "cn": i + 1, "cv": self.cum_vol[i], "cw": self.cum_w[i], "top1": self.top_seller_share[i],
             "notcrash": self.not_crash(i), "steady": self.steady(i), "dev_drop": self.last_cre_sell[i] >= th if self.creator else False,
             "creator_hold": self.creator_hold[i], "bundle_hold": self.bundle_hold[i], "uniq60": self.uniq60(i),
-            "nw30": w30["new_buyers"], "n15": w15["n"], "v15": w15["vol"], "b10": w10["buy_usd"], "s10": w10["sell_usd"],
+            "nw30": w30["new_buyers"], "n15": w15["n"], "v15": w15["vol"],
+            "n10": w10["n"], "b10": w10["buy_usd"], "s10": w10["sell_usd"],
             "swing30": self.swing_low(i, 30),
         }
