@@ -89,6 +89,7 @@ jobs:
             exit "$rc"
           fi
           python scripts/hourly_report.py --data-dir ./data --out ./report
+          python scripts/entry_filter_research.py --data-dir ./data --out ./report
 
       - name: Upload observation data and report
         if: always()
