@@ -11,7 +11,7 @@ is closed by 120s at the latest (the configured hold cap can only be lower). No 
 """
 from __future__ import annotations
 
-from .signals import decide
+from .signals import decide, guards, lane_k, lane_b
 from .tape import Tape
 
 HARD_MIN_ENTRY_T = 30
@@ -86,6 +86,61 @@ class CoinEngine:
         self.next_ok_bt = fbt + 1
         return ("exited", rec)
 
+    def _diagnose(self, i: int) -> dict | None:
+        """Explain every completed-second entry evaluation without changing trading decisions."""
+        tp = self.tape
+        t = tp.t[i]
+        if not (HARD_MIN_ENTRY_T < t <= HARD_MAX_ENTRY_T):
+            return None
+        mc = tp.spot[i] * 1e9
+        base = {"mint": tp.mint, "t_plus": t, "bt": tp.bt[i], "spot": tp.spot[i], "mcap": mc,
+                "cum_trades": i + 1, "decision": "rejected", "reasons": []}
+        if not (self.cfg.mcap_min <= mc <= self.cfg.mcap_max):
+            base["reasons"] = ["market_cap_below_min" if mc < self.cfg.mcap_min else "market_cap_above_max"]
+            return base
+        if tp.n < 20:
+            base["reasons"] = ["insufficient_tape_history"]
+            return base
+        f = tp.features(i)
+        base["features"] = f
+        why = guards(f, self.cfg, self.rug_bundle)
+        if why:
+            base["reasons"] = [why]
+            return base
+        lane_reasons = {}
+        for ln in self.lanes:
+            if ln == "K":
+                passed = lane_k(f, self.cfg)
+                failures = []
+                if f["n10"] < self.cfg.k_min_trades_10:
+                    failures.append("lane_k_trades_10_below_min")
+                if f["b10"] < self.cfg.k_min_buy_usd_10:
+                    failures.append("lane_k_buy_usd_10_below_min")
+                if f["b10"] < self.cfg.k_buy_sell_ratio * max(f["s10"], 1.0):
+                    failures.append("lane_k_buy_sell_ratio")
+            elif ln == "B":
+                passed = lane_b(f, self.cfg)
+                failures = []
+                if not f["steady"]:
+                    failures.append("lane_b_not_steady")
+                if f["nw30"] < 15:
+                    failures.append("lane_b_fresh_buyers_below_15")
+                if f["uniq60"] < self.cfg.uniq60_min:
+                    failures.append("lane_b_unique_trader_ratio")
+            else:
+                lane_reasons[ln] = ["unsupported_lane"]
+                continue
+            lane_reasons[ln] = [] if passed else failures
+        base["lane_checks"] = lane_reasons
+        passed_lanes = [ln for ln, reasons in lane_reasons.items() if not reasons]
+        if passed_lanes:
+            base["decision"] = "signal"
+            base["signal_lanes"] = passed_lanes
+            base["reasons"] = []
+        else:
+            base["reasons"] = sorted({reason for reasons in lane_reasons.values() for reason in reasons}) or ["no_configured_lane_passed"]
+        return base
+
     def _evaluate(self, i: int):
         """Entry decision at the last trade of a completed second."""
         tp = self.tape
@@ -159,14 +214,18 @@ class CoinEngine:
             return out
         bt = int(x["bt"])
         # 1) the previous second is complete -> entry decision at its last trade
-        if tp.n and bt > tp.bt[-1] and not self.pending:
-            info = self._evaluate(tp.n - 1)
-            if info:
-                ok, why, stake = self.gate(info) if self.gate else (True, "ok", 1.0)
-                info["taken"], info["gate_reason"], info["stake"] = ok, why, stake
-                out.append(("signal", info))
-                if ok:
-                    self.pending = Pending("enter", info["sig_bt"] + FILL_DELAY, info)
+        if tp.n and bt > tp.bt[-1]:
+            diagnostic = self._diagnose(tp.n - 1)
+            if diagnostic:
+                out.append(("diagnostic", diagnostic))
+            if not self.pending:
+                info = self._evaluate(tp.n - 1)
+                if info:
+                    ok, why, stake = self.gate(info) if self.gate else (True, "ok", 1.0)
+                    info["taken"], info["gate_reason"], info["stake"] = ok, why, stake
+                    out.append(("signal", info))
+                    if ok:
+                        self.pending = Pending("enter", info["sig_bt"] + FILL_DELAY, info)
         j = tp.append(x)
         # 2) open position: time cap first (hard <= 120s)
         if self.pos and not self.pending and bt > self.pos.ent_bt + self.hold:
