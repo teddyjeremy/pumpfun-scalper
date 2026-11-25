@@ -9,7 +9,7 @@ import os
 import statistics
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-\nfrom pumpbot.exit_research import simulate_exit_variants
+from pumpbot.exit_research import simulate_exit_variants
 
 
 def read_jsonl(path: str) -> list[dict]:
@@ -152,7 +152,8 @@ def main() -> None:
     write_csv(os.path.join(args.out, "coin_decisions.csv"), decisions)
     write_csv(os.path.join(args.out, "missed_opportunities.csv"), missed)
     write_csv(os.path.join(args.out, "profitable_missed_opportunities.csv"), profitable_missed)
-    write_csv(os.path.join(args.out, "risk_gate_missed_trades.csv"), risk_missed)\n    write_csv(os.path.join(args.out, "exit_counterfactuals.csv"), exit_counterfactuals)
+    write_csv(os.path.join(args.out, "risk_gate_missed_trades.csv"), risk_missed)
+    write_csv(os.path.join(args.out, "exit_counterfactuals.csv"), exit_counterfactuals)
 
     by_lane = {lane: stats([x for x in shadow if x.get("lane") == lane])
                for lane in sorted({x.get("lane", "?") for x in shadow})}
