@@ -95,6 +95,18 @@ class CoinEngine:
         mc = tp.spot[i] * 1e9
         base = {"mint": tp.mint, "t_plus": t, "bt": tp.bt[i], "spot": tp.spot[i], "mcap": mc,
                 "cum_trades": i + 1, "decision": "rejected", "reasons": []}
+        if self.pos:
+            base["reasons"] = ["position_already_open"]
+            return base
+        if self.pending:
+            base["reasons"] = ["entry_or_exit_pending"]
+            return base
+        if self.entries >= self.cfg.max_entries_per_coin:
+            base["reasons"] = ["max_entries_per_coin_reached"]
+            return base
+        if tp.bt[i] < self.next_ok_bt:
+            base["reasons"] = ["post_exit_cooldown"]
+            return base
         if not (self.cfg.mcap_min <= mc <= self.cfg.mcap_max):
             base["reasons"] = ["market_cap_below_min" if mc < self.cfg.mcap_min else "market_cap_above_max"]
             return base
