@@ -36,5 +36,6 @@ def test_no_trigger_is_mark_only_not_an_executable_exit():
     results = simulate_exit_variants(trade, tape)
 
     assert len(results) == 2
-    assert all(x["status"] == "no_trigger_observation_end_mark" for x in results)
+    assert all(x["trigger_reason"] == "time_cap" for x in results)
+    assert all(x["status"] == "filled_fallback" for x in results)
     assert all(x["executable_exit"] is False for x in results)
