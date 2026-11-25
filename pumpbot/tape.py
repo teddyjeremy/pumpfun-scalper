@@ -109,6 +109,14 @@ class Tape:
         H = self.high[i]; L = self.low_since_high[i]; s = self.spot[i]
         w10 = self.win(i, 10); w15 = self.win(i, 15); w30 = self.win(i, 30)
         th = self.t_high[i]
+        def ret(seconds: int):
+            j = bisect.bisect_right(self.bt, self.bt[i] - seconds, 0, i + 1) - 1
+            return (s / self.spot[j] - 1) if j >= 0 and self.spot[j] > 0 else None
+        prev10 = self.win(i, 10, lag=10)
+        large_sells = sum(
+            1 for k in range(w10["lo"], w10["hi"])
+            if not self.buy[k] and self.usd[k] >= max(1.0, 0.25 * w10["sell_usd"])
+        )
         return {
             "i": i, "bt": self.bt[i], "t": self.t[i], "mc": s * SUPPLY, "spot": s,
             "dip": 1 - s / H if H else 0.0, "depth": 1 - L / H if H else 0.0,
@@ -119,4 +127,10 @@ class Tape:
             "nw30": w30["new_buyers"], "n15": w15["n"], "v15": w15["vol"],
             "n10": w10["n"], "b10": w10["buy_usd"], "s10": w10["sell_usd"],
             "swing30": self.swing_low(i, 30),
+            # Research-only context; these fields do not participate in decide()/guards().
+            "ret5": ret(5), "ret10": ret(10), "ret20": ret(20), "ret30": ret(30),
+            "buy_usd_10s_prev": prev10["buy_usd"], "sell_usd_10s_prev": prev10["sell_usd"],
+            "buy_volume_accel_10s": w10["buy_usd"] - prev10["buy_usd"],
+            "sell_volume_accel_10s": w10["sell_usd"] - prev10["sell_usd"],
+            "large_sells_10s": large_sells,
         }
