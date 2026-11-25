@@ -76,7 +76,7 @@ class Config:
     # Lane K momentum parameters
     k_buy_sell_ratio: float = 1.0
     k_min_trades_10: int = 4
-    k_min_buy_usd_10: float = 0.0
+    k_min_buy_usd_10: float = 25.0
     # Exits
     tp_mult: float = 1.5
     max_hold_s: int = 90
