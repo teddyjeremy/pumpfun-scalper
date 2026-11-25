@@ -103,6 +103,7 @@ class Bot:
                 if int(ev["timestamp"]) - c.t0 > OBSERVATION_S:
                     continue
                 self.stats["trades"] += 1
+                self.record_raw_coin_trade(c, ev, slot)
                 if c.fee_bps is None:
                     c.fee_bps = (ev.get("fee_bps") or 0) + (ev.get("creator_fee_bps") or 0)
                 if ev.get("quote_mint") and ev["quote_mint"] != c.quote_mint:
@@ -149,6 +150,21 @@ class Bot:
                 "usd": amt / 10 ** dec * usd, "spot": spot, "trader": ev["user"], "tok": ev["token_amount"] / 1e6,
                 "sol": (amt / 10 ** dec * usd / sol_usd) if sol_usd else 0.0, "slot": slot or 0}
 
+    def record_raw_coin_trade(self, c: Coin, ev: dict, slot):
+        """Keep decoded on-chain trade fields even when a USD quote is temporarily unavailable."""
+        t = int(ev["timestamp"]) - c.t0
+        if t < 0 or t > OBSERVATION_S:
+            return
+        self.j.write("coin_raw_tape", {
+            "mint": c.mint, "symbol": c.symbol, "t_plus": t, "block_timestamp": int(ev["timestamp"]),
+            "side": "buy" if ev["is_buy"] else "sell", "trader": ev.get("user"), "slot": slot or 0,
+            "sol_amount_raw": ev.get("sol_amount"), "quote_amount_raw": ev.get("quote_amount"),
+            "token_amount_raw": ev.get("token_amount"), "quote_mint": ev.get("quote_mint") or c.quote_mint,
+            "virtual_sol_reserves_raw": ev.get("virtual_sol_reserves"),
+            "virtual_quote_reserves_raw": ev.get("virtual_quote_reserves"),
+            "virtual_token_reserves_raw": ev.get("virtual_token_reserves"),
+            "fee_bps": ev.get("fee_bps"), "creator_fee_bps": ev.get("creator_fee_bps")
+        })
     def record_coin_trade(self, c: Coin, trade: dict):
         """Persist every decoded trade during the coin first ten minutes."""
         if trade.get("t", OBSERVATION_S + 1) > OBSERVATION_S:
