@@ -66,11 +66,11 @@ def simulate_exit_variants(trade: dict, tape_rows: list[dict], fee: float = 0.01
             })
             continue
         target = trigger + 1
-        fill = next((r for r in rows if int(r["bt"]) >= target), None)
+        fill = next((r for r in rows if target <= int(r["bt"]) <= target + 2), None)
         fallback = False
         if fill is None:
             eligible = [r for r in rows if int(r["bt"]) <= target]
-            fill = eligible[-1] if eligible else rows[-1]
+            fill = eligible[-1] if eligible else rows[0]
             fallback = True
         exit_px = float(fill["price_usd"])
         out.append({
