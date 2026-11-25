@@ -92,7 +92,7 @@ def main() -> None:
     exit_variant_stats["actual_current_exit"] = {
         "trades_with_observation": len(actual_values),
         "executable_counterfactual_exits": len(actual_values),
-        "no_trigger_or_mark_only": 0,
+        "fallback_fills": 0,
         "executable_avg_net_per_1usd": round(statistics.mean(actual_values), 5) if actual_values else None,
         "executable_total_net_per_1usd": round(sum(actual_values), 5),
     }
@@ -102,7 +102,7 @@ def main() -> None:
         exit_variant_stats[name] = {
             "trades_with_observation": len(rows),
             "executable_counterfactual_exits": len(executable),
-            "no_trigger_or_mark_only": len(rows) - len(executable),
+            "fallback_fills": len(rows) - len(executable),
             "executable_avg_net_per_1usd": round(statistics.mean(
                 float(x["net_per_1usd"]) for x in executable
             ), 5) if executable else None,
@@ -220,12 +220,12 @@ def main() -> None:
         f"- Incomplete ten-minute observations: {report['coins_with_incomplete_ten_minute_observation']}",
         "",
         "## Parallel exit research (does not affect actual decisions)", "",
-        "| Variant | Trades observed | Executable exits | Mark-only/no trigger | Avg net per $1 |",
+        "| Variant | Trades observed | Executable exits | Fallback fills | Avg net per $1 |",
         "|---|---:|---:|---:|---:|",
     ]
     for name, x in exit_variant_stats.items():
         lines.append(f"| {name} | {x['trades_with_observation']} | {x['executable_counterfactual_exits']} | "
-                     f"{x['no_trigger_or_mark_only']} | {x['executable_avg_net_per_1usd']} |")
+                     f"{x['fallback_fills']} | {x['executable_avg_net_per_1usd']} |")
     if not exit_variant_stats:
         lines.append("| No counterfactual rows | | | | |")
     lines += ["", "## Why entries were rejected", "", "| Reason | Samples |", "|---|---:|"]
