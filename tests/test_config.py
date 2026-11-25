@@ -3,10 +3,27 @@ import os
 from pumpbot.config import Config, redact
 
 
-def test_default_is_paper(monkeypatch):
+def test_default_is_paper_and_high_frequency_lanes(monkeypatch):
     monkeypatch.delenv("MODE", raising=False)
+    monkeypatch.delenv("LANES", raising=False)
     c = Config.from_env()
-    assert c.mode == "paper" and c.validate() == []
+    assert c.mode == "paper" and c.lanes == ["K", "B"] and c.validate() == []
+
+
+def test_lane_k_thresholds_are_configurable(monkeypatch):
+    monkeypatch.setenv("K_BUY_SELL_RATIO", "1.25")
+    monkeypatch.setenv("K_MIN_TRADES_10", "5")
+    monkeypatch.setenv("K_MIN_BUY_USD_10", "40")
+    c = Config.from_env()
+    assert (c.k_buy_sell_ratio, c.k_min_trades_10, c.k_min_buy_usd_10) == (1.25, 5, 40.0)
+
+
+def test_bankroll_settings_are_loaded(monkeypatch):
+    monkeypatch.setenv("START_WALLET_USD", "10")
+    monkeypatch.setenv("BASE_STAKE_USD", "0.25")
+    monkeypatch.setenv("MAX_STAKE_FRAC", "0.10")
+    c = Config.from_env()
+    assert (c.start_wallet_usd, c.base_stake_usd, c.max_stake_frac) == (10.0, 0.25, 0.10)
 
 
 def test_live_needs_all_gates(monkeypatch):
