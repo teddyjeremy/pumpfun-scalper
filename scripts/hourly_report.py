@@ -81,6 +81,18 @@ def main() -> None:
                 **variant,
             })
     exit_variant_stats = {}
+    actual_with_tape = [
+        x for x in taken
+        if x.get("entry_bt") and tape_by_mint.get(x.get("mint"))
+    ]
+    actual_values = [float(x.get("net_per_1usd") or 0) for x in actual_with_tape]
+    exit_variant_stats["actual_current_exit"] = {
+        "trades_with_observation": len(actual_values),
+        "executable_counterfactual_exits": len(actual_values),
+        "no_trigger_or_mark_only": 0,
+        "executable_avg_net_per_1usd": round(statistics.mean(actual_values), 5) if actual_values else None,
+        "executable_total_net_per_1usd": round(sum(actual_values), 5),
+    }
     for name in sorted({x["variant"] for x in exit_counterfactuals}):
         rows = [x for x in exit_counterfactuals if x["variant"] == name]
         executable = [x for x in rows if x.get("executable_exit")]
