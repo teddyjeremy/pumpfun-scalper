@@ -37,6 +37,7 @@ jobs:
       START_WALLET_USD: "10"
       BASE_STAKE_USD: "0.25"
       MAX_STAKE_USD: "0.25"
+      MAX_STAKE_FRAC: "0.10"
       DAILY_LOSS_CAP: "0.10"
       KILL_WALLET_USD: "9"
       MAX_TRADES_PER_DAY: "50"
