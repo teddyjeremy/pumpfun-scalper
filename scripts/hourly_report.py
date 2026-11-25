@@ -207,7 +207,6 @@ def main() -> None:
         "## Parallel exit research (does not affect actual decisions)", "",
         "| Variant | Trades observed | Executable exits | Mark-only/no trigger | Avg net per $1 |",
         "|---|---:|---:|---:|---:|",
-        "| Reason | Samples |", "|---|---:|",
     ]
     for name, x in exit_variant_stats.items():
         lines.append(f"| {name} | {x['trades_with_observation']} | {x['executable_counterfactual_exits']} | "
