@@ -19,6 +19,7 @@ from .journal import Journal, daily_summary, eat_day
 from .prices import Prices
 from .risk import RiskManager, pnl_for_stake
 from .tape import Tape
+from .entry_research import candidate_capture_reasons
 
 OBSERVATION_S = int(os.environ.get("COIN_OBSERVATION_SECONDS", "600"))
 UNTRADED_RETENTION_S = HARD_MAX_ENTRY_T + HARD_MAX_HOLD_S + 5
@@ -28,7 +29,8 @@ class Coin:
     __slots__ = (
         "mint", "t0", "creator", "curve", "quote_mint", "fee_bps", "engine",
         "shadow", "buf", "buf_since", "symbol", "live", "completed",
-        "finalized", "capture", "recorded_tape_n", "raw_buf",
+        "finalized", "capture", "recorded_tape_n", "raw_buf", "capture_reason",
+        "capture_t_plus", "entry_filled",
     )
 
     def __init__(self, ev, cfg, gate):
@@ -46,6 +48,9 @@ class Coin:
         self.completed = False
         self.finalized = False
         self.capture = False
+        self.capture_reason = None
+        self.capture_t_plus = None
+        self.entry_filled = False
         self.recorded_tape_n = 0
         self.raw_buf = []
 
@@ -61,7 +66,8 @@ class Bot:
         self.risk.paper_reset = cfg.mode == "paper" and os.environ.get("PAPER_RESET_AFTER_WIPEOUT", "yes") == "yes"
         self.coins: dict[str, Coin] = {}
         self.stats = {"creates": 0, "trades": 0, "signals": 0, "taken": 0, "skips": {},
-                      "coins_captured": 0, "coins_pruned_untraded": 0}
+                      "coins_captured": 0, "candidate_captures": 0, "filled_entry_captures": 0,
+                      "observation_windows_finalized": 0, "coins_pruned_untraded": 0}
         self.exec = PaperExecutor() if cfg.mode == "paper" else ChainExecutor(cfg, self.j.log, cfg.mode)
         self.stop = False
         self._restore_lane_history()
@@ -179,14 +185,31 @@ class Bot:
             "slot": slot or 0,
         }
 
-    def activate_coin_capture(self, c: Coin):
+    def activate_coin_capture(self, c: Coin, reason: str, t_plus: int | None = None):
+        """Retain a full ten-minute tape for a filled entry or a research candidate."""
+        if t_plus is None:
+            t_plus = int(time.time()) - c.t0
         if c.capture:
+            if reason == "accepted_entry_filled" and not c.entry_filled:
+                c.entry_filled = True
+                self.stats["filled_entry_captures"] += 1
+                self.j.write("coin_events", {
+                    "mint": c.mint, "symbol": c.symbol,
+                    "event": "entry_filled_after_research_capture", "t_plus": t_plus,
+                })
             return
         c.capture = True
+        c.capture_reason = reason
+        c.capture_t_plus = int(t_plus)
+        if reason == "accepted_entry_filled":
+            c.entry_filled = True
+            self.stats["filled_entry_captures"] += 1
+        else:
+            self.stats["candidate_captures"] += 1
         self.stats["coins_captured"] += 1
         self.j.write("coin_events", {
             "mint": c.mint, "symbol": c.symbol, "event": "capture_started",
-            "reason": "accepted_entry_filled", "t_plus": int(time.time()) - c.t0,
+            "reason": reason, "t_plus": int(t_plus),
         })
         for ev, slot in c.raw_buf:
             self.record_raw_coin_trade(c, ev, slot)
@@ -231,7 +254,7 @@ class Bot:
             "buy_usd_10s": f["b10"], "sell_usd_10s": f["s10"], "trades_10s": f["n10"],
             "new_buyers_30s": f["nw30"], "creator_hold": f["creator_hold"],
             "bundle_hold": f["bundle_hold"], "top_seller_share": f["top1"],
-            "quote_mint": c.quote_mint,
+            "features": f, "quote_mint": c.quote_mint,
         })
 
     def record_coin_trade(self, c: Coin, trade: dict):
@@ -261,6 +284,8 @@ class Bot:
                 "peak_price_usd": tp.spot[peak_i], "peak_t_plus": tp.t[peak_i],
                 "low_price_usd": tp.spot[low_i], "low_t_plus": tp.t[low_i],
                 "last_t_plus": tp.t[-1], "completed": c.completed,
+                "capture_reason": c.capture_reason, "capture_t_plus": c.capture_t_plus,
+                "entry_filled": c.entry_filled,
                 "observation_complete": observed >= OBSERVATION_S,
                 "return_from_first": (tp.spot[-1] / first - 1) if first else None,
                 "peak_return_from_first": (tp.spot[peak_i] / first - 1) if first else None,
@@ -270,9 +295,12 @@ class Bot:
                 "mint": c.mint, "symbol": c.symbol, "created_at": c.t0,
                 "observation_seconds": OBSERVATION_S, "observed_seconds": observed,
                 "trade_count": 0, "completed": c.completed,
+                "capture_reason": c.capture_reason, "capture_t_plus": c.capture_t_plus,
+                "entry_filled": c.entry_filled,
                 "observation_complete": observed >= OBSERVATION_S, "no_priced_trades": True,
             })
         c.finalized = True
+        self.stats["observation_windows_finalized"] += 1
 
     def shadow_handle(self, c: Coin, events: list):
         for kind, r in events:
@@ -291,6 +319,11 @@ class Bot:
                 self.j.write("coin_decisions", {"mint": c.mint, "symbol": c.symbol, **info})
             elif kind == "signal":
                 f = info.pop("feat", {})
+                candidate_reasons = candidate_capture_reasons(f)
+                if candidate_reasons:
+                    self.activate_coin_capture(
+                        c, "research_candidate:" + ",".join(candidate_reasons), t_plus=info["t"]
+                    )
                 self.j.write("signals", {
                     "mint": c.mint, "symbol": c.symbol, "quote_mint": c.quote_mint,
                     "lane": info["lane"], "t_plus": info["t"], "mcap": round(info["mc"]),
@@ -302,7 +335,7 @@ class Bot:
                     if self.cfg.mode != "paper":
                         asyncio.get_event_loop().create_task(self.exec_buy(c, info["stake"]))
             elif kind == "entered":
-                self.activate_coin_capture(c)
+                self.activate_coin_capture(c, "accepted_entry_filled")
                 if self.cfg.mode != "paper":
                     self.j.log(f"POSITION FILLED {c.symbol} at ${info['px']:.10f}")
             elif kind == "exit_trigger":
@@ -457,7 +490,8 @@ class Bot:
                 self.finalize_coin(c)
         self.j.status({
             "risk": self.risk.state(), "coins_tracked": len(self.coins), "stats": self.stats,
-            "shutdown": True, "observation_windows_finalized": sum(1 for c in self.coins.values() if c.finalized),
+            "shutdown": True,
+            "observation_windows_finalized": self.stats["observation_windows_finalized"],
         })
         self.j.log("shutdown: finalized captured coin summaries and wrote final status")
         current = asyncio.current_task()
