@@ -1,4 +1,4 @@
-"""Main loop:  python -m pumpbot.bot   (MODE=paper by default; see DEPLOY.md before anything else)."""
+"""Main loop: python -m pumpbot.bot (MODE=paper by default)."""
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +11,7 @@ import time
 
 from .alerts import telegram
 from .config import Config
-from .engine import CoinEngine, HARD_MAX_ENTRY_T
+from .engine import CoinEngine, HARD_MAX_ENTRY_T, HARD_MAX_HOLD_S
 from .events import SOL
 from .execution import ChainExecutor, PaperExecutor
 from .feed import Feed
@@ -20,24 +20,34 @@ from .prices import Prices
 from .risk import RiskManager, pnl_for_stake
 from .tape import Tape
 
-OBSERVATION_S = int(os.environ.get('COIN_OBSERVATION_SECONDS', '600'))
+OBSERVATION_S = int(os.environ.get("COIN_OBSERVATION_SECONDS", "600"))
+UNTRADED_RETENTION_S = HARD_MAX_ENTRY_T + HARD_MAX_HOLD_S + 5
 
 
 class Coin:
-    __slots__ = ("mint", "t0", "creator", "curve", "quote_mint", "fee_bps", "engine", "shadow", "buf", "buf_since", "symbol", "live", "completed", "finalized")
+    __slots__ = (
+        "mint", "t0", "creator", "curve", "quote_mint", "fee_bps", "engine",
+        "shadow", "buf", "buf_since", "symbol", "live", "completed",
+        "finalized", "capture", "recorded_tape_n", "raw_buf",
+    )
 
     def __init__(self, ev, cfg, gate):
         self.mint, self.t0, self.creator = ev["mint"], int(ev["timestamp"]), ev.get("creator")
-        self.curve = ev.get("bonding_curve"); self.symbol = ev.get("symbol") or self.mint[:6]
+        self.curve = ev.get("bonding_curve")
+        self.symbol = ev.get("symbol") or self.mint[:6]
         self.quote_mint = ev.get("quote_mint") or SOL
         self.fee_bps = None
         self.engine = CoinEngine(Tape(self.mint, self.t0, self.creator, self.quote_mint), cfg, gate=gate)
-        # shadow: every on-time signal at $1, no bankroll gating (the research measurement; feeds the live gate)
+        # Shadow engine retains the existing ungated research measurement.
         self.shadow = CoinEngine(Tape(self.mint, self.t0, self.creator, self.quote_mint), cfg, gate=None)
-        self.buf = []; self.buf_since = None
-        self.live = None                     # live/simulate execution record for the open position
+        self.buf = []
+        self.buf_since = None
+        self.live = None
         self.completed = False
         self.finalized = False
+        self.capture = False
+        self.recorded_tape_n = 0
+        self.raw_buf = []
 
 
 class Bot:
@@ -50,18 +60,17 @@ class Bot:
         self.risk = RiskManager(cfg)
         self.risk.paper_reset = cfg.mode == "paper" and os.environ.get("PAPER_RESET_AFTER_WIPEOUT", "yes") == "yes"
         self.coins: dict[str, Coin] = {}
-        self.stats = {"creates": 0, "trades": 0, "signals": 0, "taken": 0, "skips": {}}
+        self.stats = {"creates": 0, "trades": 0, "signals": 0, "taken": 0, "skips": {},
+                      "coins_captured": 0, "coins_pruned_untraded": 0}
         self.exec = PaperExecutor() if cfg.mode == "paper" else ChainExecutor(cfg, self.j.log, cfg.mode)
         self.stop = False
         self._restore_lane_history()
 
-    # ------------------------------------------------------------------ startup gates
     def _restore_lane_history(self):
         for t in self.j.read_trades(self.cfg.mode)[-500:]:
             self.risk.lane_hist[t["lane"]].append(t["net_per_1usd"])
 
     def live_gate(self) -> list[str]:
-        """Live: keep only lanes whose paper journal shows >= N trades and a positive average (unless overridden)."""
         if self.cfg.mode != "live" or not self.cfg.live_require_paper_edge:
             return self.cfg.lanes
         paper = Journal(self.cfg.data_dir, "paper").read_kind("shadow")
@@ -74,7 +83,6 @@ class Bot:
                 keep.append(ln)
         return keep
 
-    # ------------------------------------------------------------------ risk gate called by engines
     def gate(self, info) -> tuple[bool, str, float]:
         self.stats["signals"] += 1
         ok, why, stake = self.risk.allow(info["lane"], eat_day())
@@ -85,38 +93,52 @@ class Bot:
             self.stats["skips"][why] = self.stats["skips"].get(why, 0) + 1
         return ok, why, stake
 
-    # ------------------------------------------------------------------ feed handling
     def on_events(self, evs, sig, slot, recv):
         for kind, ev in evs:
             if kind == "create":
                 if ev["mint"] not in self.coins and recv <= self.started_at + self.discovery_seconds:
                     self.coins[ev["mint"]] = Coin(ev, self.cfg, self.gate)
                     self.stats["creates"] += 1
-                    self.j.write("coins", {"mint": ev["mint"], "symbol": ev.get("symbol"), "name": ev.get("name"),
-                                           "creator": ev.get("creator"), "bonding_curve": ev.get("bonding_curve"),
-                                           "quote_mint": ev.get("quote_mint") or SOL, "created_at": int(ev["timestamp"]),
-                                           "observation_end_t_plus": OBSERVATION_S})
+                    self.j.write("coins", {
+                        "mint": ev["mint"], "symbol": ev.get("symbol"), "name": ev.get("name"),
+                        "creator": ev.get("creator"), "bonding_curve": ev.get("bonding_curve"),
+                        "quote_mint": ev.get("quote_mint") or SOL, "created_at": int(ev["timestamp"]),
+                        "entry_window_end_t_plus": HARD_MAX_ENTRY_T,
+                        "full_observation_seconds_if_traded": OBSERVATION_S,
+                    })
             elif kind == "trade":
                 c = self.coins.get(ev["mint"])
                 if c is None:
-                    continue                    # no create seen -> no full tape -> never traded
-                if int(ev["timestamp"]) - c.t0 > OBSERVATION_S:
+                    continue
+                t_plus = int(ev["timestamp"]) - c.t0
+                end_s = OBSERVATION_S if c.capture else UNTRADED_RETENTION_S
+                if t_plus < 0 or t_plus > end_s:
                     continue
                 self.stats["trades"] += 1
-                self.record_raw_coin_trade(c, ev, slot)
+                if c.capture:
+                    self.record_raw_coin_trade(c, ev, slot)
+                elif t_plus <= HARD_MAX_ENTRY_T + 5:
+                    # Keep only a temporary pre-entry buffer; discard it for coins
+                    # that never get a filled entry.
+                    c.raw_buf.append((dict(ev), slot))
                 if c.fee_bps is None:
                     c.fee_bps = (ev.get("fee_bps") or 0) + (ev.get("creator_fee_bps") or 0)
                 if ev.get("quote_mint") and ev["quote_mint"] != c.quote_mint:
-                    c.quote_mint = ev["quote_mint"]; c.engine.tape.quote_mint = c.quote_mint; c.shadow.tape.quote_mint = c.quote_mint
+                    c.quote_mint = ev["quote_mint"]
+                    c.engine.tape.quote_mint = c.quote_mint
+                    c.shadow.tape.quote_mint = c.quote_mint
                 tr = self.to_trade(c, ev, slot)
                 if tr is None:
-                    c.buf.append((ev, slot)); c.buf_since = c.buf_since or recv
+                    c.buf.append((ev, slot))
+                    c.buf_since = c.buf_since or recv
                     continue
                 if c.buf:
                     for e2, s2 in c.buf:
                         t2 = self.to_trade(c, e2, s2)
                         if t2:
-                            self.handle(c, c.engine.on_trade(t2)); self.shadow_handle(c, c.shadow.on_trade(t2)); self.record_coin_trade(c, t2)
+                            self.handle(c, c.engine.on_trade(t2))
+                            self.shadow_handle(c, c.shadow.on_trade(t2))
+                            self.record_coin_trade(c, t2)
                     c.buf = []
                 self.handle(c, c.engine.on_trade(tr))
                 self.shadow_handle(c, c.shadow.on_trade(tr))
@@ -125,8 +147,10 @@ class Bot:
                 c = self.coins.get(ev["mint"])
                 if c:
                     c.completed = True
-                    self.j.write("coin_events", {"mint": c.mint, "symbol": c.symbol, "event": "complete",
-                                                  "t_plus": int(time.time()) - c.t0})
+                    self.j.write("coin_events", {
+                        "mint": c.mint, "symbol": c.symbol, "event": "complete",
+                        "t_plus": int(time.time()) - c.t0,
+                    })
 
     def to_trade(self, c: Coin, ev: dict, slot) -> dict | None:
         if c.quote_mint == SOL:
@@ -146,76 +170,120 @@ class Bot:
             return None
         spot = (vq / 10 ** dec) / (vt / 1e6) * usd
         sol_usd = self.prices.sol_usd or 0
-        return {"bt": int(ev["timestamp"]), "t": int(ev["timestamp"]) - c.t0, "side": "buy" if ev["is_buy"] else "sell",
-                "usd": amt / 10 ** dec * usd, "spot": spot, "trader": ev["user"], "tok": ev["token_amount"] / 1e6,
-                "sol": (amt / 10 ** dec * usd / sol_usd) if sol_usd else 0.0, "slot": slot or 0}
+        return {
+            "bt": int(ev["timestamp"]), "t": int(ev["timestamp"]) - c.t0,
+            "side": "buy" if ev["is_buy"] else "sell",
+            "usd": amt / 10 ** dec * usd, "spot": spot, "trader": ev["user"],
+            "tok": ev["token_amount"] / 1e6,
+            "sol": (amt / 10 ** dec * usd / sol_usd) if sol_usd else 0.0,
+            "slot": slot or 0,
+        }
+
+    def activate_coin_capture(self, c: Coin):
+        if c.capture:
+            return
+        c.capture = True
+        self.stats["coins_captured"] += 1
+        self.j.write("coin_events", {
+            "mint": c.mint, "symbol": c.symbol, "event": "capture_started",
+            "reason": "accepted_entry_filled", "t_plus": int(time.time()) - c.t0,
+        })
+        for ev, slot in c.raw_buf:
+            self.record_raw_coin_trade(c, ev, slot)
+        c.raw_buf.clear()
+        # Flush the in-memory priced tape so the capture includes pre-entry context.
+        tp = c.engine.tape
+        for i in range(tp.n):
+            self.record_coin_tape_index(c, i)
+        c.recorded_tape_n = tp.n
+        self.j.log(f"CAPTURE {c.symbol}: full {OBSERVATION_S}s coin tape enabled")
 
     def record_raw_coin_trade(self, c: Coin, ev: dict, slot):
-        """Keep decoded on-chain trade fields even when a USD quote is temporarily unavailable."""
+        if not c.capture:
+            return
         t = int(ev["timestamp"]) - c.t0
         if t < 0 or t > OBSERVATION_S:
             return
         self.j.write("coin_raw_tape", {
-            "mint": c.mint, "symbol": c.symbol, "t_plus": t, "block_timestamp": int(ev["timestamp"]),
-            "side": "buy" if ev["is_buy"] else "sell", "trader": ev.get("user"), "slot": slot or 0,
-            "sol_amount_raw": ev.get("sol_amount"), "quote_amount_raw": ev.get("quote_amount"),
-            "token_amount_raw": ev.get("token_amount"), "quote_mint": ev.get("quote_mint") or c.quote_mint,
+            "mint": c.mint, "symbol": c.symbol, "t_plus": t,
+            "block_timestamp": int(ev["timestamp"]),
+            "side": "buy" if ev["is_buy"] else "sell", "trader": ev.get("user"),
+            "slot": slot or 0, "sol_amount_raw": ev.get("sol_amount"),
+            "quote_amount_raw": ev.get("quote_amount"), "token_amount_raw": ev.get("token_amount"),
+            "quote_mint": ev.get("quote_mint") or c.quote_mint,
             "virtual_sol_reserves_raw": ev.get("virtual_sol_reserves"),
             "virtual_quote_reserves_raw": ev.get("virtual_quote_reserves"),
             "virtual_token_reserves_raw": ev.get("virtual_token_reserves"),
-            "fee_bps": ev.get("fee_bps"), "creator_fee_bps": ev.get("creator_fee_bps")
-        })
-    def record_coin_trade(self, c: Coin, trade: dict):
-        """Persist every decoded trade during the coin first ten minutes."""
-        if trade.get("t", OBSERVATION_S + 1) > OBSERVATION_S:
-            return
-        tp = c.engine.tape
-        if not tp.n:
-            return
-        i = tp.n - 1
-        f = tp.features(i)
-        self.j.write("coin_tape", {
-            "mint": c.mint, "symbol": c.symbol, "t_plus": trade["t"], "bt": trade["bt"],
-            "side": trade["side"], "price_usd": trade["spot"], "market_cap_usd": trade["spot"] * 1e9,
-            "trade_usd": trade.get("usd", 0), "trader": trade.get("trader"), "slot": trade.get("slot"),
-            "cumulative_trades": tp.n, "cumulative_volume_usd": tp.cum_vol[i],
-            "unique_traders": tp.cum_w[i], "buy_usd_10s": f["b10"], "sell_usd_10s": f["s10"],
-            "trades_10s": f["n10"], "new_buyers_30s": f["nw30"], "creator_hold": f["creator_hold"],
-            "bundle_hold": f["bundle_hold"], "top_seller_share": f["top1"], "quote_mint": c.quote_mint
+            "fee_bps": ev.get("fee_bps"), "creator_fee_bps": ev.get("creator_fee_bps"),
         })
 
-    def finalize_coin(self, c: Coin):
-        if c.finalized:
+    def record_coin_tape_index(self, c: Coin, i: int):
+        tp = c.engine.tape
+        if i < 0 or i >= tp.n:
+            return
+        f = tp.features(i)
+        self.j.write("coin_tape", {
+            "mint": c.mint, "symbol": c.symbol, "t_plus": tp.t[i], "bt": tp.bt[i],
+            "side": "buy" if tp.buy[i] else "sell", "price_usd": tp.spot[i],
+            "market_cap_usd": tp.spot[i] * 1e9, "trade_usd": tp.usd[i],
+            "trader": tp.trader[i], "slot": tp.slot[i], "cumulative_trades": i + 1,
+            "cumulative_volume_usd": tp.cum_vol[i], "unique_traders": tp.cum_w[i],
+            "buy_usd_10s": f["b10"], "sell_usd_10s": f["s10"], "trades_10s": f["n10"],
+            "new_buyers_30s": f["nw30"], "creator_hold": f["creator_hold"],
+            "bundle_hold": f["bundle_hold"], "top_seller_share": f["top1"],
+            "quote_mint": c.quote_mint,
+        })
+
+    def record_coin_trade(self, c: Coin, trade: dict):
+        if not c.capture or trade.get("t", OBSERVATION_S + 1) > OBSERVATION_S:
             return
         tp = c.engine.tape
+        while c.recorded_tape_n < tp.n:
+            self.record_coin_tape_index(c, c.recorded_tape_n)
+            c.recorded_tape_n += 1
+
+    def finalize_coin(self, c: Coin):
+        if c.finalized or not c.capture:
+            return
+        tp = c.engine.tape
+        observed = max(0, min(OBSERVATION_S, int(time.time()) - c.t0))
         if tp.n:
-            i = tp.n - 1
-            first = tp.spot[0]
             peak_i = max(range(tp.n), key=lambda k: tp.spot[k])
             low_i = min(range(tp.n), key=lambda k: tp.spot[k])
+            first = tp.spot[0]
             self.j.write("coin_summaries", {
-                "mint": c.mint, "symbol": c.symbol, "creator": c.creator, "quote_mint": c.quote_mint,
-                "created_at": c.t0, "observation_seconds": OBSERVATION_S, "trade_count": tp.n,
-                "buy_count": sum(tp.buy), "sell_count": tp.n - sum(tp.buy),
+                "mint": c.mint, "symbol": c.symbol, "creator": c.creator,
+                "quote_mint": c.quote_mint, "created_at": c.t0,
+                "observation_seconds": OBSERVATION_S, "observed_seconds": observed,
+                "trade_count": tp.n, "buy_count": sum(tp.buy), "sell_count": tp.n - sum(tp.buy),
                 "volume_usd": round(tp.cum_vol[-1], 4), "unique_traders": tp.cum_w[-1],
-                "first_price_usd": first, "last_price_usd": tp.spot[i],
+                "first_price_usd": first, "last_price_usd": tp.spot[-1],
                 "peak_price_usd": tp.spot[peak_i], "peak_t_plus": tp.t[peak_i],
                 "low_price_usd": tp.spot[low_i], "low_t_plus": tp.t[low_i],
-                "last_t_plus": tp.t[i], "completed": c.completed,
-                "return_from_first": (tp.spot[i] / first - 1) if first else None,
-                "peak_return_from_first": (tp.spot[peak_i] / first - 1) if first else None
+                "last_t_plus": tp.t[-1], "completed": c.completed,
+                "observation_complete": observed >= OBSERVATION_S,
+                "return_from_first": (tp.spot[-1] / first - 1) if first else None,
+                "peak_return_from_first": (tp.spot[peak_i] / first - 1) if first else None,
             })
         else:
-            self.j.write("coin_summaries", {"mint": c.mint, "symbol": c.symbol, "created_at": c.t0,
-                                             "observation_seconds": OBSERVATION_S, "trade_count": 0,
-                                             "completed": c.completed, "no_priced_trades": True})
+            self.j.write("coin_summaries", {
+                "mint": c.mint, "symbol": c.symbol, "created_at": c.t0,
+                "observation_seconds": OBSERVATION_S, "observed_seconds": observed,
+                "trade_count": 0, "completed": c.completed,
+                "observation_complete": observed >= OBSERVATION_S, "no_priced_trades": True,
+            })
         c.finalized = True
+
     def shadow_handle(self, c: Coin, events: list):
         for kind, r in events:
             if kind == "exited":
-                self.j.write("shadow", {"mint": c.mint, "symbol": c.symbol, "quote_mint": c.quote_mint, "lane": r["lane"],
-                                        "entry_t_plus": r["entry_t"], "hold_s": r["hold_s"], "exit": r["exit"], "mult": round(r["mult"], 4),
-                                        "net_per_1usd": round(r["net"], 5), "mfe": round(r["mfe"], 4), "mae": round(r["mae"], 4)})
+                self.j.write("shadow", {
+                    "mint": c.mint, "symbol": c.symbol, "quote_mint": c.quote_mint,
+                    "lane": r["lane"], "entry_t_plus": r["entry_t"], "hold_s": r["hold_s"],
+                    "exit": r["exit"], "mult": round(r["mult"], 4),
+                    "net_per_1usd": round(r["net"], 5), "mfe": round(r["mfe"], 4),
+                    "mae": round(r["mae"], 4),
+                })
 
     def handle(self, c: Coin, events: list):
         for kind, info in events:
@@ -223,13 +291,20 @@ class Bot:
                 self.j.write("coin_decisions", {"mint": c.mint, "symbol": c.symbol, **info})
             elif kind == "signal":
                 f = info.pop("feat", {})
-                self.j.write("signals", {"mint": c.mint, "symbol": c.symbol, "quote_mint": c.quote_mint, "lane": info["lane"],
-                                         "t_plus": info["t"], "mcap": round(info["mc"]), "taken": info["taken"], "gate": info["gate_reason"],
-                                         "stake": info["stake"], "feat": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in f.items()}})
+                self.j.write("signals", {
+                    "mint": c.mint, "symbol": c.symbol, "quote_mint": c.quote_mint,
+                    "lane": info["lane"], "t_plus": info["t"], "mcap": round(info["mc"]),
+                    "taken": info["taken"], "gate": info["gate_reason"], "stake": info["stake"],
+                    "feat": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in f.items()},
+                })
                 if info["taken"]:
-                    self.j.log(f"ENTER {info['lane']} {c.symbol} {c.mint[:8]} t+{info['t']}s mcap ${info['mc']:,.0f} stake ${info['stake']:.2f}")
+                    self.j.log(f"ENTRY ACCEPTED {info['lane']} {c.symbol} {c.mint[:8]} t+{info['t']}s stake ${info['stake']:.2f}")
                     if self.cfg.mode != "paper":
                         asyncio.get_event_loop().create_task(self.exec_buy(c, info["stake"]))
+            elif kind == "entered":
+                self.activate_coin_capture(c)
+                if self.cfg.mode != "paper":
+                    self.j.log(f"POSITION FILLED {c.symbol} at ${info['px']:.10f}")
             elif kind == "exit_trigger":
                 if self.cfg.mode != "paper" and c.live and c.live.get("ok"):
                     asyncio.get_event_loop().create_task(self.exec_sell(c, info["reason"]))
@@ -237,24 +312,31 @@ class Bot:
                 r = info
                 pnl = pnl_for_stake(r["net"], r["stake"], self.cfg.gas_usd_round_trip)
                 if self.cfg.mode != "live":
-                    self.risk.on_close(r["lane"], pnl, r["net"])          # paper / simulate: model P&L
+                    self.risk.on_close(r["lane"], pnl, r["net"])
                 elif not (c.live and c.live.get("ok")):
-                    self.risk.on_close(r["lane"], 0.0, 0.0)               # live buy failed: nothing happened
+                    self.risk.on_close(r["lane"], 0.0, 0.0)
                     pnl = 0.0
-                # live with a real fill: exec_sell closes the risk position with the real wallet delta
-                rec = {"mint": c.mint, "symbol": c.symbol, "quote_mint": c.quote_mint, "lane": r["lane"], "entry_t_plus": r["entry_t"],
-                       "ent_px": r["ent_px"], "exit_px": r["exit_px"], "hold_s": r["hold_s"], "exit": r["exit"], "mult": round(r["mult"], 4),
-                       "net_per_1usd": round(r["net"], 5), "stake": r["stake"], "pnl_usd": round(pnl, 5), "mfe": round(r["mfe"], 4),
-                       "mae": round(r["mae"], 4), "live": c.live, "wallet_after": round(self.risk.wallet, 4)}
+                rec = {
+                    "mint": c.mint, "symbol": c.symbol, "quote_mint": c.quote_mint,
+                    "lane": r["lane"], "entry_t_plus": r["entry_t"], "entry_bt": r["ent_bt"],
+                    "exit_bt": r["exit_bt"], "ent_px": r["ent_px"], "exit_px": r["exit_px"],
+                    "hold_s": r["hold_s"], "exit": r["exit"], "mult": round(r["mult"], 4),
+                    "net_per_1usd": round(r["net"], 5), "stake": r["stake"],
+                    "pnl_usd": round(pnl, 5), "mfe": round(r["mfe"], 4),
+                    "mae": round(r["mae"], 4), "live": c.live,
+                    "wallet_after": round(self.risk.wallet, 4),
+                }
                 self.j.write("trades", rec)
                 self.j.log(f"EXIT {r['lane']} {c.symbol} {r['exit']} hold {r['hold_s']}s x{r['mult']:.3f} pnl ${pnl:+.3f} wallet ${self.risk.wallet:.3f}")
-                asyncio.get_event_loop().create_task(telegram(f"[{self.cfg.mode}] {c.symbol} {r['exit']} x{r['mult']:.2f} pnl ${pnl:+.3f} wallet ${self.risk.wallet:.2f}"))
+                asyncio.get_event_loop().create_task(telegram(
+                    f"[{self.cfg.mode}] {c.symbol} {r['exit']} x{r['mult']:.2f} pnl ${pnl:+.3f} wallet ${self.risk.wallet:.2f}"
+                ))
                 if self.risk.killed or self.risk.wallet < self.cfg.kill_wallet_usd:
                     if self.risk.paper_reset:
-                        self.j.log(f"PAPER WIPEOUT #{self.risk.wipeouts + 1}: wallet below $1.20 (would stop live). Paper resets to $2 to keep collecting data.")
-                        continue
-                    self.j.log("KILL SWITCH: wallet below minimum. No more entries.")
-                    asyncio.get_event_loop().create_task(telegram("KILL SWITCH: wallet below $1.20, bot stopped entering."))
+                        self.j.log("Paper wipeout reached; paper reset is enabled.")
+                    else:
+                        self.j.log("KILL SWITCH: wallet below minimum. No more entries.")
+                        asyncio.get_event_loop().create_task(telegram("KILL SWITCH: wallet below minimum."))
 
     async def exec_buy(self, c: Coin, stake: float):
         try:
@@ -262,8 +344,10 @@ class Bot:
         except Exception as e:
             c.live = {"ok": False, "err": f"{type(e).__name__}: {e}"}
         c.live["stake"] = stake
-        c.live["lane"] = (c.engine.pending.info.get("lane") if c.engine.pending and c.engine.pending.kind == "enter"
-                          else (c.engine.pos.lane if c.engine.pos else "B"))
+        c.live["lane"] = (
+            c.engine.pending.info.get("lane") if c.engine.pending and c.engine.pending.kind == "enter"
+            else (c.engine.pos.lane if c.engine.pos else "B")
+        )
         self.j.write("exec", {"side": "buy", "mint": c.mint, "result": c.live})
         if not c.live.get("ok"):
             self.j.log(f"BUY FAILED {c.symbol}: {c.live.get('err')}")
@@ -275,7 +359,6 @@ class Bot:
             r = {"ok": False, "err": f"{type(e).__name__}: {e}"}
         self.j.write("exec", {"side": "sell", "mint": c.mint, "reason": reason, "result": r})
         if self.cfg.mode == "live":
-            # live wallet truth: re-read the real balance and close the risk position with the real delta
             try:
                 w = await self.exec.wallet_usd(self.prices.sol_usd)
                 pnl = w - self.risk.wallet
@@ -284,10 +367,9 @@ class Bot:
             except Exception:
                 self.risk.open = 0
         if not r.get("ok"):
-            self.j.log(f"SELL FAILED {c.symbol}: {r.get('err')}  -> check the wallet manually")
+            self.j.log(f"SELL FAILED {c.symbol}: {r.get('err')} -> check wallet manually")
             await telegram(f"SELL FAILED {c.symbol} {c.mint}: {r.get('err')}")
 
-    # ------------------------------------------------------------------ housekeeping
     async def ticker(self):
         last_day = eat_day()
         while not self.stop:
@@ -298,24 +380,33 @@ class Bot:
                     self.shadow_handle(c, c.shadow.on_tick(now))
                 if c.engine.pos or c.engine.pending:
                     self.handle(c, c.engine.on_tick(now))
-                elif c.shadow.pos or c.shadow.pending:
-                    pass
-                if now - c.t0 >= OBSERVATION_S:
+                retention = OBSERVATION_S if c.capture else UNTRADED_RETENTION_S
+                if now - c.t0 >= retention:
                     self.finalize_coin(c)
                     if not c.engine.pos and not c.engine.pending and not c.shadow.pos and not c.shadow.pending:
                         self.coins.pop(m, None)
+                        if not c.capture:
+                            self.stats["coins_pruned_untraded"] += 1
             d = eat_day()
             if d != last_day:
-                s = daily_summary(self.j.read_trades(), last_day)
+                summary = daily_summary(self.j.read_trades(), last_day)
                 with open(self.j.path(f"daily_{self.cfg.mode}_{last_day}.json"), "w") as f:
-                    json.dump(s, f, indent=1)
-                self.j.log(f"DAILY {json.dumps(s)}")
-                await telegram(f"Daily {last_day} [{self.cfg.mode}]: {json.dumps(s)}")
+                    json.dump(summary, f, indent=1)
+                self.j.log(f"DAILY {json.dumps(summary)}")
+                await telegram(f"Daily {last_day} [{self.cfg.mode}]: {json.dumps(summary)}")
                 last_day = d
             if int(now) % 15 == 0:
-                self.j.status({"risk": self.risk.state(), "coins_tracked": len(self.coins), "stats": self.stats,
-                               "sol_usd": self.prices.sol_usd, "feeds": {k: round(now - v, 1) for k, v in self.feed.last_msg.items()},
-                               "open": [m for m, c in self.coins.items() if c.engine.pos]})
+                self.j.status({
+                    "risk": self.risk.state(), "coins_tracked": len(self.coins), "stats": self.stats,
+                    "sol_usd": self.prices.sol_usd,
+                    "feeds": {k: round(now - v, 1) for k, v in self.feed.last_msg.items()},
+                    "open": [m for m, c in self.coins.items() if c.engine.pos],
+                })
+            observation_deadline = self.started_at + self.discovery_seconds + OBSERVATION_S
+            if now >= observation_deadline and not self.coins:
+                self.j.log("All coin observation windows finalized; stopping cleanly.")
+                self.shutdown()
+                return
 
     async def main(self):
         errs = self.cfg.validate()
@@ -325,21 +416,22 @@ class Bot:
             sys.exit(2)
         self.cfg.lanes = self.live_gate()
         if not self.cfg.lanes:
-            self.j.log("No lane passed the live gate (needs >=100 paper trades with a positive average). Refusing to trade live.")
+            self.j.log("No lane passed the live gate; refusing to trade live.")
             sys.exit(3)
         self.j.log(f"start mode={self.cfg.mode} lanes={self.cfg.lanes} config={json.dumps(self.cfg.public_dict(), default=str)}")
         if self.cfg.mode == "live":
-            async with __import__("aiohttp").ClientSession() as s:
-                await self.prices._sol(s)
+            async with __import__("aiohttp").ClientSession() as session:
+                await self.prices._sol(session)
             if not self.prices.sol_usd:
-                self.j.log("no SOL/USD price; refusing to start live"); sys.exit(4)
+                self.j.log("no SOL/USD price; refusing to start live")
+                sys.exit(4)
             self.risk.wallet = self.risk.day_start = self.risk.step_base = await self.exec.wallet_usd(self.prices.sol_usd)
             self.j.log(f"live wallet ${self.risk.wallet:.3f} (keep only what you can lose; no top-ups)")
             await telegram("pumpbot LIVE started")
         self.feed = Feed(self.cfg.feed_ws_urls, self.on_events, self.j.log)
         loop = asyncio.get_running_loop()
-        for s in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(s, self.shutdown)
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, self.shutdown)
         if os.path.exists(self.j.path("STOP")):
             self.j.log("STOP file present in DATA_DIR: remove it to start")
             return
@@ -349,17 +441,29 @@ class Bot:
         while True:
             await asyncio.sleep(2)
             if os.path.exists(self.j.path("STOP")):
-                self.j.log("STOP file found: no new entries; closing open positions then exiting")
+                self.j.log("STOP file found: no new entries; waiting for open positions to close")
                 self.risk.killed = True
                 while any(c.engine.pos or c.engine.pending for c in self.coins.values()):
                     await asyncio.sleep(1)
                 self.shutdown()
+                return
 
     def shutdown(self):
+        if self.stop:
+            return
         self.stop = True
-        self.j.log("shutdown")
-        for t in asyncio.all_tasks():
-            t.cancel()
+        for c in list(self.coins.values()):
+            if c.capture:
+                self.finalize_coin(c)
+        self.j.status({
+            "risk": self.risk.state(), "coins_tracked": len(self.coins), "stats": self.stats,
+            "shutdown": True, "observation_windows_finalized": sum(1 for c in self.coins.values() if c.finalized),
+        })
+        self.j.log("shutdown: finalized captured coin summaries and wrote final status")
+        current = asyncio.current_task()
+        for task in asyncio.all_tasks():
+            if task is not current:
+                task.cancel()
 
 
 def main():
