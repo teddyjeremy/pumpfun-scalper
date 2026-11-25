@@ -9,6 +9,7 @@ import os
 import statistics
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+\nfrom pumpbot.exit_research import simulate_exit_variants
 
 
 def read_jsonl(path: str) -> list[dict]:
@@ -64,6 +65,37 @@ def main() -> None:
     tape = read_jsonl(os.path.join(args.data_dir, "coin_tape_paper.jsonl"))
     raw_tape = read_jsonl(os.path.join(args.data_dir, "coin_raw_tape_paper.jsonl"))
 
+    # Full tapes are now retained only for coins with a filled accepted entry.
+    tape_by_mint = defaultdict(list)
+    for row in tape:
+        tape_by_mint[row.get("mint")].append(row)
+
+    exit_counterfactuals = []
+    for trade in taken:
+        variants = simulate_exit_variants(trade, tape_by_mint.get(trade.get("mint"), []))
+        for variant in variants:
+            exit_counterfactuals.append({
+                "symbol": trade.get("symbol"), "mint": trade.get("mint"),
+                "lane": trade.get("lane"), "actual_exit": trade.get("exit"),
+                "actual_net_per_1usd": trade.get("net_per_1usd"),
+                **variant,
+            })
+    exit_variant_stats = {}
+    for name in sorted({x["variant"] for x in exit_counterfactuals}):
+        rows = [x for x in exit_counterfactuals if x["variant"] == name]
+        executable = [x for x in rows if x.get("executable_exit")]
+        exit_variant_stats[name] = {
+            "trades_with_observation": len(rows),
+            "executable_counterfactual_exits": len(executable),
+            "no_trigger_or_mark_only": len(rows) - len(executable),
+            "executable_avg_net_per_1usd": round(statistics.mean(
+                float(x["net_per_1usd"]) for x in executable
+            ), 5) if executable else None,
+            "executable_total_net_per_1usd": round(sum(
+                float(x["net_per_1usd"]) for x in executable
+            ), 5),
+        }
+
     # Existing counterfactual: a configured lane signalled, but the bankroll gate rejected it.
     sig_index = {(s.get("mint"), s.get("lane"), int(s.get("t_plus", -1))): s for s in signals}
     risk_missed = []
@@ -79,9 +111,6 @@ def main() -> None:
             })
 
     # For every rejected decision, measure what the observed tape did afterwards.
-    tape_by_mint = defaultdict(list)
-    for row in tape:
-        tape_by_mint[row.get("mint")].append(row)
     missed = []
     reason_counts = Counter()
     for d in decisions:
@@ -123,7 +152,7 @@ def main() -> None:
     write_csv(os.path.join(args.out, "coin_decisions.csv"), decisions)
     write_csv(os.path.join(args.out, "missed_opportunities.csv"), missed)
     write_csv(os.path.join(args.out, "profitable_missed_opportunities.csv"), profitable_missed)
-    write_csv(os.path.join(args.out, "risk_gate_missed_trades.csv"), risk_missed)
+    write_csv(os.path.join(args.out, "risk_gate_missed_trades.csv"), risk_missed)\n    write_csv(os.path.join(args.out, "exit_counterfactuals.csv"), exit_counterfactuals)
 
     by_lane = {lane: stats([x for x in shadow if x.get("lane") == lane])
                for lane in sorted({x.get("lane", "?") for x in shadow})}
@@ -131,6 +160,11 @@ def main() -> None:
         "generated_utc": datetime.now(timezone.utc).isoformat(), "mode": "paper_only",
         "warning": "Post-decision peak is an upper-bound diagnostic, not an executable fill or proof of profitability. End-price estimates still omit latency and market impact.",
         "coins_detected": len(coins), "coins_with_summaries": len(summaries),
+        "coins_captured_for_full_observation": len({x.get("mint") for x in summaries}),
+        "coins_with_complete_ten_minute_observation": sum(1 for x in summaries if x.get("observation_complete")),
+        "coins_with_incomplete_ten_minute_observation": sum(1 for x in summaries if not x.get("observation_complete")),
+        "exit_counterfactual_rows": len(exit_counterfactuals),
+        "exit_counterfactual_stats": exit_variant_stats,
         "coins_with_priced_trades": sum(int(x.get("trade_count", 0)) > 0 for x in summaries),
         "coin_tape_rows": len(tape), "raw_coin_trade_rows": len(raw_tape), "entry_window_decisions": len(decisions),
         "rejection_reason_counts": dict(reason_counts),
@@ -143,6 +177,9 @@ def main() -> None:
         "risk_gate_missed_completed": len(risk_missed), "risk_gate_missed_profitable": len(risk_profitable),
         "limitations": [
             "Only coins whose create event was observed by this WebSocket feed can be analyzed; missed create events cannot be reconstructed.",
+            "Full priced and raw ten-minute tapes are stored only after an accepted entry is actually filled. Untraded coins retain creation, decision, signal and shadow records, not full future price tapes.",
+            "Rejected-decision future-price analysis is consequently limited to mints that also have a captured traded-coin tape; it is not a complete scan of all rejected coins.",
+            "Exit counterfactuals reuse the actual entry price and recorded post-entry tape. They are offline simulations, not changes to live/paper exit decisions; no-trigger rows are observation-end mark-to-market, not executable exits.",
             "Decision diagnostics explain configured Lane K/B and shared guard rejections at each completed second in the entry window.",
             "A future peak is an upper bound and must not be interpreted as a realizable trade; use observation-end return as the less optimistic comparison.",
             "The one-hour run is a diagnostic sample, not enough to establish a profitable edge or safely tune thresholds.",
@@ -160,9 +197,23 @@ def main() -> None:
         f"- Coins with priced trades: {report['coins_with_priced_trades']}",
         f"- Stored priced trade observations: {len(tape)}", f"- Stored raw on-chain trade events: {len(raw_tape)}",
         f"- Entry-window decision samples: {len(decisions)}", "",
-        "## Why entries were rejected", "",
+        "## Selective collection", "",
+        f"- Coins detected: {len(coins)}",
+        f"- Coins captured after a filled entry: {report['coins_captured_for_full_observation']}",
+        f"- Complete ten-minute observations: {report['coins_with_complete_ten_minute_observation']}",
+        f"- Incomplete ten-minute observations: {report['coins_with_incomplete_ten_minute_observation']}",
+        "",
+        "## Parallel exit research (does not affect actual decisions)", "",
+        "| Variant | Trades observed | Executable exits | Mark-only/no trigger | Avg net per $1 |",
+        "|---|---:|---:|---:|---:|",
         "| Reason | Samples |", "|---|---:|",
     ]
+    for name, x in exit_variant_stats.items():
+        lines.append(f"| {name} | {x['trades_with_observation']} | {x['executable_counterfactual_exits']} | "
+                     f"{x['no_trigger_or_mark_only']} | {x['executable_avg_net_per_1usd']} |")
+    if not exit_variant_stats:
+        lines.append("| No counterfactual rows | | | | |")
+    lines += ["", "## Why entries were rejected", "", "| Reason | Samples |", "|---|---:|"]
     lines += [f"| {k} | {v} |" for k, v in reason_counts.most_common()]
     lines += ["", "## Rejected decisions with positive observation-end return", "",
               "| Token | Mint | t+ | Rejection reason | Net at t+600 on $1 | Peak upper bound |",
