@@ -35,10 +35,13 @@ def simulate_exit_variants(trade: dict, tape_rows: list[dict], fee: float = 0.01
         "confirmed_sell_surge_2s": {"trigger": None, "start": None},
         "price_confirmed_sell_surge": {"trigger": None, "start": None},
     }
+    hard_exit_bt = entry_bt + 120
     for i, row in enumerate(rows):
         bt = int(row.get("bt", 0))
+        if bt > hard_exit_bt:
+            break
         px = float(row.get("price_usd") or 0)
-        surge = _sell_surge(rows[:i + 1], bt)
+        surge = bt - entry_bt >= 5 and _sell_surge(rows[:i + 1], bt)
         state = variants["confirmed_sell_surge_2s"]
         if state["trigger"] is None:
             if surge:
@@ -55,16 +58,11 @@ def simulate_exit_variants(trade: dict, tape_rows: list[dict], fee: float = 0.01
     out = []
     for name, state in variants.items():
         trigger = state["trigger"]
+        reason = "sell_surge"
         if trigger is None:
-            last = rows[-1]
-            out.append({
-                "variant": name, "status": "no_trigger_observation_end_mark",
-                "trigger_bt": None, "exit_bt": int(last["bt"]),
-                "exit_price_usd": float(last["price_usd"]),
-                "net_per_1usd": round(_net_per_1usd(entry_px, float(last["price_usd"]), fee, gas), 5),
-                "executable_exit": False,
-            })
-            continue
+            # Respect the engine's hard maximum holding period in both alternatives.
+            trigger = hard_exit_bt
+            reason = "time_cap"
         target = trigger + 1
         fill = next((r for r in rows if target <= int(r["bt"]) <= target + 2), None)
         fallback = False
@@ -75,7 +73,8 @@ def simulate_exit_variants(trade: dict, tape_rows: list[dict], fee: float = 0.01
         exit_px = float(fill["price_usd"])
         out.append({
             "variant": name, "status": "filled_fallback" if fallback else "filled",
-            "trigger_bt": trigger, "exit_bt": int(fill["bt"]), "exit_price_usd": exit_px,
+            "trigger_reason": reason, "trigger_bt": trigger,
+            "exit_bt": int(fill["bt"]), "exit_price_usd": exit_px,
             "net_per_1usd": round(_net_per_1usd(entry_px, exit_px, fee, gas), 5),
             "executable_exit": not fallback,
         })
