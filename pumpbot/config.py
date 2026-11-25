@@ -146,6 +146,8 @@ class Config:
             errs.append("entry window must stay inside t+30s..t+300s")
         if self.k_buy_sell_ratio < 0 or self.k_min_trades_10 < 1 or self.k_min_buy_usd_10 < 0:
             errs.append("invalid Lane K momentum thresholds")
+        if self.start_wallet_usd <= 0 or self.base_stake_usd <= 0 or not (0 < self.max_stake_frac <= 1):
+            errs.append("invalid bankroll settings: wallet/stake must be positive and MAX_STAKE_FRAC must be in (0, 1]")
         if self.mode == "simulate" and not self.sim_wallet_pubkey:
             errs.append("MODE=simulate needs SIM_WALLET_PUBKEY (public key only)")
         if self.mode == "live":
