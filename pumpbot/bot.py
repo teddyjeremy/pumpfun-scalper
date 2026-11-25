@@ -211,7 +211,7 @@ class Bot:
             "virtual_sol_reserves_raw": ev.get("virtual_sol_reserves"),
             "virtual_quote_reserves_raw": ev.get("virtual_quote_reserves"),
             "virtual_token_reserves_raw": ev.get("virtual_token_reserves"),
-            "fee_bps": ev.get("fee_bps"), "creator_fee_bps": ev.get("creator_fee_bps),
+            "fee_bps": ev.get("fee_bps"), "creator_fee_bps": ev.get("creator_fee_bps"),
         })
 
     def record_coin_tape_index(self, c: Coin, i: int):
