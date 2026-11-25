@@ -40,15 +40,15 @@ SECRET_ENV_NAMES = ("WALLET_PRIVATE_KEY", "RPC_HTTP_URL", "FEED_WS_URLS", "SEND_
 
 
 def redact(s: str) -> str:
+    """Remove anything that looks like a key/token before logging."""
     import re
-    s = re.sub(r"(api[-_]?key=)[^&\\s\\\"']+", r"\\1***", s, flags=re.I)
-    s = re.sub(r"(https?|wss?)://([^/\\s\\\"']+)/[^\\s\\\"']*", r"\\1://\\2/***", s)
+    s = re.sub(r"(api[-_]?key=)[^&\s\"']+", r"\1***", s, flags=re.I)
+    s = re.sub(r"(https?|wss?)://([^/\s\"']+)/[^\s\"']*", r"\1://\2/***", s)
     for n in SECRET_ENV_NAMES:
         v = os.environ.get(n)
         if v and len(v) > 6:
             s = s.replace(v, "***")
     return s
-
 
 @dataclass
 class Config:
