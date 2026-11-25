@@ -77,9 +77,11 @@ jobs:
           minutes="${{ inputs.duration_minutes }}"
           seconds=$((minutes * 60))
           total_seconds=$((seconds + 600))
-          echo "Discovering coins for ${minutes} minutes, then allowing a 10-minute per-coin observation tail. Paper only."
+          timeout_seconds=$((total_seconds + 120))
+          echo "Discovering coins for ${minutes} minutes. Traded coins receive up to ten minutes of tape; untraded coins are pruned after their entry/shadow window. Paper only."
+          echo "The bot should stop itself after all observation windows finalize; timeout leaves a 120-second graceful-shutdown buffer."
           set +e
-          timeout --signal=INT --kill-after=30s "${total_seconds}s" env DISCOVERY_SECONDS="$seconds" COIN_OBSERVATION_SECONDS=600 python -m pumpbot.bot
+          timeout --signal=INT --kill-after=120s "${timeout_seconds}s" env DISCOVERY_SECONDS="$seconds" COIN_OBSERVATION_SECONDS=600 python -m pumpbot.bot
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
