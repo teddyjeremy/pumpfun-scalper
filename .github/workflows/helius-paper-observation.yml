@@ -23,10 +23,11 @@ concurrency:
 jobs:
   paper-observation:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 85
     env:
       MODE: paper
       DATA_DIR: ./data
+      COIN_OBSERVATION_SECONDS: "600"
       HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
       FEED_WS_URLS: wss://mainnet.helius-rpc.com/?api-key=${{ secrets.HELIUS_API_KEY }}
       RPC_HTTP_URL: https://mainnet.helius-rpc.com/?api-key=${{ secrets.HELIUS_API_KEY }}
@@ -75,9 +76,10 @@ jobs:
         run: |
           minutes="${{ inputs.duration_minutes }}"
           seconds=$((minutes * 60))
-          echo "Starting MODE=paper for ${minutes} minutes. No transactions can be sent."
+          total_seconds=$((seconds + 600))
+          echo "Discovering coins for ${minutes} minutes, then allowing a 10-minute per-coin observation tail. Paper only."
           set +e
-          timeout --signal=INT --kill-after=30s "${seconds}s" python -m pumpbot.bot
+          timeout --signal=INT --kill-after=30s "${total_seconds}s" env DISCOVERY_SECONDS="$seconds" COIN_OBSERVATION_SECONDS=600 python -m pumpbot.bot
           rc=$?
           set -e
           if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
