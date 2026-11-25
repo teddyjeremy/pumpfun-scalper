@@ -62,6 +62,7 @@ def main() -> None:
     summaries = read_jsonl(os.path.join(args.data_dir, "coin_summaries_paper.jsonl"))
     decisions = read_jsonl(os.path.join(args.data_dir, "coin_decisions_paper.jsonl"))
     tape = read_jsonl(os.path.join(args.data_dir, "coin_tape_paper.jsonl"))
+    raw_tape = read_jsonl(os.path.join(args.data_dir, "coin_raw_tape_paper.jsonl"))
 
     # Existing counterfactual: a configured lane signalled, but the bankroll gate rejected it.
     sig_index = {(s.get("mint"), s.get("lane"), int(s.get("t_plus", -1))): s for s in signals}
@@ -118,6 +119,7 @@ def main() -> None:
 
     write_csv(os.path.join(args.out, "coins.csv"), coins)
     write_csv(os.path.join(args.out, "coin_summaries.csv"), summaries)
+    write_csv(os.path.join(args.out, "coin_raw_tape.csv"), raw_tape)
     write_csv(os.path.join(args.out, "coin_decisions.csv"), decisions)
     write_csv(os.path.join(args.out, "missed_opportunities.csv"), missed)
     write_csv(os.path.join(args.out, "profitable_missed_opportunities.csv"), profitable_missed)
@@ -130,7 +132,7 @@ def main() -> None:
         "warning": "Post-decision peak is an upper-bound diagnostic, not an executable fill or proof of profitability. End-price estimates still omit latency and market impact.",
         "coins_detected": len(coins), "coins_with_summaries": len(summaries),
         "coins_with_priced_trades": sum(int(x.get("trade_count", 0)) > 0 for x in summaries),
-        "coin_tape_rows": len(tape), "entry_window_decisions": len(decisions),
+        "coin_tape_rows": len(tape), "raw_coin_trade_rows": len(raw_tape), "entry_window_decisions": len(decisions),
         "rejection_reason_counts": dict(reason_counts),
         "rejected_decisions_with_later_observations": len(missed),
         "rejected_decisions_profitable_at_observation_end": len(profitable_missed),
@@ -156,7 +158,8 @@ def main() -> None:
         "## Collection summary", "",
         f"- Coins detected: {len(coins)}", f"- Coins with completed summaries: {len(summaries)}",
         f"- Coins with priced trades: {report['coins_with_priced_trades']}",
-        f"- Stored per-trade observations: {len(tape)}", f"- Entry-window decision samples: {len(decisions)}", "",
+        f"- Stored priced trade observations: {len(tape)}", f"- Stored raw on-chain trade events: {len(raw_tape)}",
+        f"- Entry-window decision samples: {len(decisions)}", "",
         "## Why entries were rejected", "",
         "| Reason | Samples |", "|---|---:|",
     ]
