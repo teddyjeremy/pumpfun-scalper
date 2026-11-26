@@ -33,7 +33,6 @@ def main():
     decisions = read_jsonl(os.path.join(args.data_dir, "sniper_decisions_sniper.jsonl"))
     entries = read_jsonl(os.path.join(args.data_dir, "sniper_entries_sniper.jsonl"))
     trades = read_jsonl(os.path.join(args.data_dir, "sniper_trades_sniper.jsonl"))
-    status_rows = read_jsonl(os.path.join(args.data_dir, "unused.jsonl"))
     wins = [x for x in trades if float(x.get("net_pnl_usd", 0)) > 0]
     losses = [x for x in trades if float(x.get("net_pnl_usd", 0)) <= 0]
     net = sum(float(x.get("net_pnl_usd", 0)) for x in trades)
