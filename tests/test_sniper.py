@@ -298,3 +298,120 @@ def test_transaction_complete_lane_timer_exit_records_stale_price_age(tmp_path):
     assert len(trades) == 1
     assert trades[0]["exit_reason"] == "time_cap_timer"
     assert trades[0]["exit_price_stale_seconds"] == 31
+
+
+
+def test_high_conviction_lane_requires_signal_confirmation_then_later_execution(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+
+    signal = [
+        dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000),
+        dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000),
+    ]
+    bot.on_events([("trade", x) for x in signal], "v2-signal", 2, bot.started + 1)
+    assert bot.v2_lane.position is None
+    assert bot.v2_lane.pending[MINT]["stage"] == "signal"
+
+    confirmation = [
+        dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000),
+        dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000),
+    ]
+    bot.on_events([("trade", x) for x in confirmation], "v2-confirmation", 3, bot.started + 2)
+    assert bot.v2_lane.position is None
+    assert bot.v2_lane.pending[MINT]["stage"] == "confirmed"
+
+    execution = [trade_event(1003, user=BUYER, price_mult=1.20)]
+    bot.on_events(execution, "v2-execution", 4, bot.started + 3)
+    pos = bot.v2_lane.position
+    assert pos is not None
+    assert pos["entry_signature"] == "v2-execution"
+    assert pos["signal_signature"] == "v2-signal"
+    assert pos["confirmation_signature"] == "v2-confirmation"
+    assert pos["entry_sequence"] > pos["confirmation_sequence"] > pos["signal_sequence"]
+    assert pos["entry_price_sol"] == bot.spot_sol(execution[0][1])
+
+
+def test_high_conviction_lane_rejects_weak_confirmation_momentum(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([
+        trade_event(1001, user=BUYER),
+        trade_event(1001, user=BUYER2),
+    ], "v2-signal", 2, bot.started + 1)
+    bot.on_events([
+        trade_event(1002, user=BUYER, price_mult=1.0),
+        trade_event(1002, user=BUYER2, price_mult=1.01),
+    ], "v2-weak-confirmation", 3, bot.started + 2)
+
+    assert MINT not in bot.v2_lane.pending
+    assert bot.v2_lane.position is None
+    decisions = bot.j.read_kind("sniper_v2_decisions")
+    rejected = [x for x in decisions if x["decision"] == "rejected_confirmation_quality"]
+    assert len(rejected) == 1
+    assert "confirmation_momentum_too_weak" in rejected[0]["reasons"]
+
+
+def test_high_conviction_lane_uses_conservative_entry_and_exit_marks(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([
+        ("trade", dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000)),
+    ], "v2-signal", 2, bot.started + 1)
+    bot.on_events([
+        ("trade", dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000)),
+    ], "v2-confirmation", 3, bot.started + 2)
+    entry_events = [
+        trade_event(1003, user=BUYER, price_mult=1.20),
+        trade_event(1003, user=BUYER2, price_mult=1.30),
+    ]
+    bot.on_events(entry_events, "v2-execution", 4, bot.started + 3)
+    expected_entry = max(bot.spot_sol(x[1]) for x in entry_events)
+    assert bot.v2_lane.position["entry_price_sol"] == expected_entry
+
+    exit_events = [
+        trade_event(1004, buy=False, user=BUYER, price_mult=1.70),
+        trade_event(1004, buy=False, user=BUYER2, price_mult=1.60),
+    ]
+    bot.on_events(exit_events, "v2-exit", 5, bot.started + 4)
+    trades = bot.j.read_kind("sniper_v2_trades")
+    expected_exit = min(bot.spot_sol(x[1]) for x in exit_events)
+    assert len(trades) == 1
+    assert trades[0]["exit_price_sol"] == expected_exit
+    assert trades[0]["exit_price_basis"] == "min_first_and_final_event_price"
+
+
+def test_high_conviction_lane_requires_positive_flow_on_execution_transaction(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001, user=BUYER), trade_event(1001, user=BUYER2)],
+                  "v2-signal", 2, bot.started + 1)
+    bot.on_events([
+        ("trade", dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000)),
+    ], "v2-confirmation", 3, bot.started + 2)
+    bot.on_events([trade_event(1003, buy=False, user=BUYER)], "v2-execution-sell", 4, bot.started + 3)
+    assert bot.v2_lane.position is None
+    decisions = bot.j.read_kind("sniper_v2_decisions")
+    assert any(x["decision"] == "rejected_execution_flow" for x in decisions)
+
+
+def test_high_conviction_lane_timer_exit_records_stale_quote_age(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([
+        ("trade", dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000)),
+    ], "v2-signal", 2, bot.started + 1)
+    bot.on_events([
+        ("trade", dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000)),
+    ], "v2-confirmation", 3, bot.started + 2)
+    bot.on_events([trade_event(1003, user=BUYER, price_mult=1.20)], "v2-execution", 4, bot.started + 3)
+    bot.v2_lane.timer_tick(1033)
+    trades = bot.j.read_kind("sniper_v2_trades")
+    assert len(trades) == 1
+    assert trades[0]["exit_reason"] == "time_cap_timer"
+    assert trades[0]["exit_price_stale_seconds"] == 30

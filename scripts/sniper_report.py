@@ -45,6 +45,9 @@ def main():
     tx_entries = read_jsonl(os.path.join(args.data_dir, "sniper_tx_entries_sniper.jsonl"))
     tx_trades = read_jsonl(os.path.join(args.data_dir, "sniper_tx_trades_sniper.jsonl"))
     tx_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_tx_decisions_sniper.jsonl"))
+    v2_entries = read_jsonl(os.path.join(args.data_dir, "sniper_v2_entries_sniper.jsonl"))
+    v2_trades = read_jsonl(os.path.join(args.data_dir, "sniper_v2_trades_sniper.jsonl"))
+    v2_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_v2_decisions_sniper.jsonl"))
     wins = [x for x in trades if float(x.get("net_pnl_usd", 0)) > 0]
     losses = [x for x in trades if float(x.get("net_pnl_usd", 0)) <= 0]
     net = sum(float(x.get("net_pnl_usd", 0)) for x in trades)
@@ -94,6 +97,25 @@ def main():
     tx_wins = [x for x in tx_trades if float(x.get("net_pnl_usd", 0)) > 0]
     tx_losses = [x for x in tx_trades if float(x.get("net_pnl_usd", 0)) <= 0]
     tx_decision_counts = Counter(x.get("decision", "unknown") for x in tx_decisions)
+    v2_wins = [x for x in v2_trades if float(x.get("net_pnl_usd", 0)) > 0]
+    v2_losses = [x for x in v2_trades if float(x.get("net_pnl_usd", 0)) <= 0]
+    v2_net = sum(float(x.get("net_pnl_usd", 0)) for x in v2_trades)
+    v2_positive = sum(float(x.get("net_pnl_usd", 0)) for x in v2_trades if float(x.get("net_pnl_usd", 0)) > 0)
+    v2_negative = abs(sum(float(x.get("net_pnl_usd", 0)) for x in v2_trades if float(x.get("net_pnl_usd", 0)) < 0))
+    v2_exit_counts = Counter(x.get("exit_reason", "unknown") for x in v2_trades)
+    v2_decision_counts = Counter(x.get("decision", "unknown") for x in v2_decisions)
+    v2_ordered = sorted(v2_trades, key=lambda x: (int(x.get("exit_timestamp") or 0), int(x.get("exit_sequence") or 0)))
+    v2_equity = 0.0
+    v2_peak = 0.0
+    v2_max_drawdown = 0.0
+    for row in v2_ordered:
+        v2_equity += float(row.get("net_pnl_usd", 0))
+        v2_peak = max(v2_peak, v2_equity)
+        v2_max_drawdown = min(v2_max_drawdown, v2_equity - v2_peak)
+    tape_sol_missing_price = sum(1 for x in tape if x.get("quote_mint") == "SOL" and not x.get("price_sol"))
+    tx_multi_event_count = sum(1 for x in tx_summaries if int(x.get("event_count") or 0) > 1)
+    tx_missing_final_price = sum(1 for x in tx_summaries if not x.get("final_price_sol"))
+    tx_abs_moves = [abs(float(x["intra_transaction_price_move"])) for x in tx_summaries if x.get("intra_transaction_price_move") is not None]
     tx_cohorts, tx_wallets = {}, {}
     for row in tx_trades:
         pnl = float(row.get("net_pnl_usd", 0))
@@ -154,6 +176,23 @@ def main():
         "transaction_lane_net_pnl_usd": round(sum(float(x.get("net_pnl_usd", 0)) for x in tx_trades), 6),
         "transaction_lane_unclosed_entries": max(0, len(tx_entries) - len(tx_trades)),
         "transaction_lane_decisions": dict(tx_decision_counts),
+        "high_conviction_entries": len(v2_entries),
+        "high_conviction_closed_trades": len(v2_trades),
+        "high_conviction_wins": len(v2_wins),
+        "high_conviction_losses": len(v2_losses),
+        "high_conviction_win_rate": len(v2_wins) / len(v2_trades) if v2_trades else None,
+        "high_conviction_net_pnl_usd": round(v2_net, 6),
+        "high_conviction_profit_factor": round(v2_positive / v2_negative, 4) if v2_negative else None,
+        "high_conviction_max_drawdown_usd": round(v2_max_drawdown, 6),
+        "high_conviction_exit_reasons": dict(v2_exit_counts),
+        "high_conviction_decisions": dict(v2_decision_counts),
+        "high_conviction_unclosed_entries": max(0, len(v2_entries) - len(v2_trades)),
+        "capture_quality": {
+            "sol_tape_events_missing_price": tape_sol_missing_price,
+            "transaction_multi_event_count": tx_multi_event_count,
+            "transaction_missing_final_price_count": tx_missing_final_price,
+            "transaction_mean_abs_intra_move": mean(tx_abs_moves) if tx_abs_moves else None,
+        },
         "transaction_lane_top_cohorts": tx_cohort_ranked[:20],
         "transaction_lane_top_wallets": tx_wallet_ranked[:20],
         "portfolio_capacity_comparison": capacity_results,
@@ -180,6 +219,8 @@ def main():
             "A single one-hour observation is exploratory, not evidence of profitability.",
             "Transaction-complete research aggregates all decoded events for a signature and uses the final observed reserve-derived price per mint; this remains a paper approximation, not an executable quote.",
             "Wallet-cohort results are descriptive within-session observations and do not establish wallet identity, coordination, or future performance.",
+            "The high-conviction lane waits for a separate execution transaction after its confirmation transaction and uses conservative first/final price marks; it remains a paper fill proxy, not a guaranteed executable quote.",
+            "The high-conviction confirmation thresholds are research hypotheses and require fresh out-of-sample validation; no profitability is established.",
         ],
     }
     with open(os.path.join(args.out, "sniper_report.json"), "w", encoding="utf-8") as f:
@@ -191,6 +232,11 @@ def main():
         f"- SOL-quoted launches: **{summary['sol_quoted_launches']}**",
         f"- Launches with tape: **{summary['launches_with_tape']}**",
         f"- Recorded trade events: **{summary['tape_trades']}**",
+        "", "## Capture quality",
+        f"- SOL tape events missing a reserve-derived price: **{summary['capture_quality']['sol_tape_events_missing_price']}**",
+        f"- Multi-event transaction summaries: **{summary['capture_quality']['transaction_multi_event_count']}**",
+        f"- Transaction summaries missing a final price: **{summary['capture_quality']['transaction_missing_final_price_count']}**",
+        f"- Mean absolute within-transaction price movement: **{summary['capture_quality']['transaction_mean_abs_intra_move']:.2%}**" if summary["capture_quality"]["transaction_mean_abs_intra_move"] is not None else "- Mean absolute within-transaction price movement: n/a",
         "", "## Paper results",
         f"- Entries: **{summary['paper_entries']}**",
         f"- Closed trades: **{summary['closed_trades']}**",
@@ -214,6 +260,18 @@ def main():
         *[f"- {x['buyer_wallets']}: {x['trades']} trades, {x['wins']} wins, {x['losses']} losses, net {x['net_pnl_usd']:.4f} USD" for x in tx_cohort_ranked[:10]],
         "", "### Top wallets participating in transaction-level entries",
         *[f"- {x['wallet']}: {x['trades']} trades, {x['wins']} wins, {x['losses']} losses, net {x['net_pnl_usd']:.4f} USD" for x in tx_wallet_ranked[:10]],
+        "", "## High-conviction confirmation lane (new, isolated)",
+        "- Rules: multi-buyer positive-flow signal; next transaction must have at least 2 buyers, at least 0.50 SOL buy volume, positive net flow, no creator sell, and at least 5% positive within-transaction price movement; a separate later positive-flow transaction is required for entry.",
+        "- Entry mark uses the higher of first/final prices in the execution transaction; exit mark uses the lower, to reduce favourable within-transaction marking.",
+        f"- Entries / closed trades: **{summary['high_conviction_entries']} / {summary['high_conviction_closed_trades']}**",
+        f"- Wins / losses: **{summary['high_conviction_wins']} / {summary['high_conviction_losses']}**",
+        f"- Win rate: **{summary['high_conviction_win_rate']:.1%}**" if summary["high_conviction_win_rate"] is not None else "- Win rate: n/a",
+        f"- Net simulated P&L: **{summary['high_conviction_net_pnl_usd']:.4f} USD**",
+        f"- Profit factor: **{summary['high_conviction_profit_factor']:.2f}**" if summary["high_conviction_profit_factor"] is not None else "- Profit factor: n/a",
+        f"- Exit-order max drawdown: **{summary['high_conviction_max_drawdown_usd']:.4f} USD**",
+        f"- Exit reasons: **{summary['high_conviction_exit_reasons']}**",
+        f"- Decisions: **{summary['high_conviction_decisions']}**",
+        f"- Unclosed entries: **{summary['high_conviction_unclosed_entries']}**",
         "", "## Independent shadow research",
         f"- Shadow entries: **{summary['independent_shadow_entries']}**",
         f"- Shadow closed trades: **{summary['independent_shadow_closed_trades']}**",
