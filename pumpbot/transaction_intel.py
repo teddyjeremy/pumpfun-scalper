@@ -36,6 +36,8 @@ def build_transaction_summaries(events, launches: dict, signature: str, slot: in
         creator_buy = creator_sell = False
         wallet_buy_sol = defaultdict(float)
         first_price = final_price = 0.0
+        first_virtual_sol = final_virtual_sol = 0
+        first_virtual_token = final_virtual_token = 0
         for ev in rows:
             trader = ev.get("user")
             is_buy = bool(ev.get("is_buy"))
@@ -58,7 +60,11 @@ def build_transaction_summaries(events, launches: dict, signature: str, slot: in
             if price:
                 if not first_price:
                     first_price = price
+                    first_virtual_sol = int(ev.get("virtual_sol_reserves") or 0)
+                    first_virtual_token = int(ev.get("virtual_token_reserves") or 0)
                 final_price = price
+                final_virtual_sol = int(ev.get("virtual_sol_reserves") or 0)
+                final_virtual_token = int(ev.get("virtual_token_reserves") or 0)
         if launch.quote_mint != "SOL":
             continue
         summaries.append({
@@ -76,6 +82,10 @@ def build_transaction_summaries(events, launches: dict, signature: str, slot: in
             "wallet_buy_sol": {k: round(v, 9) for k, v in sorted(wallet_buy_sol.items())},
             "first_event_price_sol": first_price or None,
             "final_price_sol": final_price or None,
+            "first_virtual_sol_reserves_raw": first_virtual_sol or None,
+            "final_virtual_sol_reserves_raw": final_virtual_sol or None,
+            "first_virtual_token_reserves_raw": first_virtual_token or None,
+            "final_virtual_token_reserves_raw": final_virtual_token or None,
             "intra_transaction_price_move": round(final_price / first_price - 1.0, 6) if first_price and final_price else None,
         })
     return summaries
