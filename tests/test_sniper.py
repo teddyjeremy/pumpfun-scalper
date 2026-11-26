@@ -95,3 +95,52 @@ def test_paper_stake_remains_fixed_when_accounting_wallet_is_below_five_dollars(
     )
     assert bot.position["stake_usd"] == 1.00
     assert bot.wallet == 4.50
+
+
+
+def test_max_hold_timer_closes_baseline_without_another_trade(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001)], "first-buy-sig", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, buy=False)], "entry-fill-sig", 3, bot.started + 2)
+    assert bot.position is not None
+    bot.timer_tick(1033)
+    assert bot.position is None
+    rows = bot.j.read_kind("sniper_trades")
+    assert rows[0]["exit_reason"] == "time_cap_timer"
+    assert rows[0]["exit_signature"] == "timer"
+    assert rows[0]["exit_price_stale_seconds"] == 31
+
+
+def test_independent_shadow_entry_is_not_blocked_by_baseline_position(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001)], "first-buy-sig", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, buy=False)], "entry-fill-sig", 3, bot.started + 2)
+    assert bot.position is not None
+
+    second_mint = "SecondMint111111111111111111111111111111111"
+    second_create = dict(create_event()[1], mint=second_mint, symbol="SECOND")
+    bot.on_events([("create", second_create)], "second-create", 4, bot.started + 3)
+    second_buy = dict(trade_event(1003)[1], mint=second_mint)
+    bot.on_events([("trade", second_buy)], "second-first-buy", 5, bot.started + 4)
+    second_follow = dict(trade_event(1004, buy=False)[1], mint=second_mint)
+    bot.on_events([("trade", second_follow)], "second-follow-up", 6, bot.started + 5)
+
+    assert bot.stats["entries_rejected_busy"] == 1
+    assert bot.position["mint"] == MINT
+    shadow_entries = bot.j.read_kind("sniper_shadow_entries")
+    assert any(row["mint"] == second_mint and row["signal_wallet"] == BUYER for row in shadow_entries)
+    assert second_mint in bot.shadow_positions
+
+
+def test_shadow_timer_exit_records_stale_quote_age(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001)], "first-buy-sig", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, buy=False)], "entry-fill-sig", 3, bot.started + 2)
+    bot.timer_tick(1033)
+    rows = bot.j.read_kind("sniper_shadow_trades")
+    assert len(rows) == 1
+    assert rows[0]["exit_reason"] == "time_cap_timer"
+    assert rows[0]["exit_price_stale_seconds"] == 31

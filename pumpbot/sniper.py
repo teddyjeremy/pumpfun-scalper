@@ -58,6 +58,8 @@ class Sniper:
         self.wallet = START_WALLET_USD
         self.open_mint: str | None = None
         self.position: dict | None = None
+        self.shadow_pending: dict[str, dict] = {}
+        self.shadow_positions: dict[str, dict] = {}
         self.stats = {
             "creates": 0, "sol_launches": 0, "trades_recorded": 0,
             "first_buy_signals": 0, "entries_filled": 0, "entries_rejected_busy": 0,
@@ -116,6 +118,7 @@ class Sniper:
                 })
                 if c.quote_mint != SOL or not price:
                     continue
+                self._shadow_process(c, ev, signature, price, t)
                 self._trade_launch(c, ev, signature, price, t)
             elif kind == "complete":
                 c = self.launches.get(ev["mint"])
@@ -179,6 +182,7 @@ class Sniper:
             "entry_timestamp": int(ev["timestamp"]), "entry_t_plus": t,
             "entry_signature": signature, "signal_signature": c.first_buy_signature,
             "entry_delay_seconds": delay,
+            "last_price_sol": price, "last_price_timestamp": int(ev["timestamp"]),
         }
         self.stats["entries_filled"] += 1
         self.j.write("sniper_entries", {**self.position, "mode": "paper"})
@@ -188,6 +192,8 @@ class Sniper:
         p = self.position
         if not p or signature == p["entry_signature"]:
             return
+        p["last_price_sol"] = price
+        p["last_price_timestamp"] = int(ev["timestamp"])
         move = price / p["entry_price_sol"] - 1.0
         held = int(ev["timestamp"]) - p["entry_timestamp"]
         reason = None
@@ -223,6 +229,116 @@ class Sniper:
             self.position = None
             self.open_mint = None
 
+
+    def _shadow_process(self, c: Launch, ev: dict, signature: str, price: float, t: int):
+        """Independent per-mint shadow lane; never blocked by the baseline portfolio."""
+        side_buy = bool(ev.get("is_buy"))
+        pending = self.shadow_pending.get(c.mint)
+        pos = self.shadow_positions.get(c.mint)
+        if pos:
+            if signature == pos["entry_signature"]:
+                return
+            pos["last_price_sol"] = price
+            pos["last_price_timestamp"] = int(ev["timestamp"])
+            move = price / pos["entry_price_sol"] - 1.0
+            held = int(ev["timestamp"]) - pos["entry_timestamp"]
+            reason = "take_profit" if move >= TAKE_PROFIT else "stop_loss" if move <= -STOP_LOSS else "time_cap" if held >= MAX_HOLD_SECONDS else None
+            if reason:
+                self._close_shadow(c.mint, price, int(ev["timestamp"]), t, signature, reason, 0)
+            return
+        if pending:
+            if signature == pending["signal_signature"]:
+                return
+            delay = int(ev["timestamp"]) - pending["signal_timestamp"]
+            if delay > ENTRY_CONFIRM_SECONDS:
+                self.shadow_pending.pop(c.mint, None)
+                self.j.write("sniper_shadow_decisions", {"mint": c.mint, "decision": "expired_no_following_trade", "delay_seconds": delay})
+                return
+            fill = {
+                "mint": c.mint, "symbol": c.symbol, "signal_wallet": pending["signal_wallet"],
+                "signal_signature": pending["signal_signature"], "signal_timestamp": pending["signal_timestamp"],
+                "entry_signature": signature, "entry_timestamp": int(ev["timestamp"]),
+                "entry_t_plus": t, "entry_delay_seconds": delay, "stake_usd": STAKE_USD,
+                "entry_price_sol": price, "entry_fill_price_sol": price * (1.0 + ENTRY_SLIPPAGE),
+                "last_price_sol": price, "last_price_timestamp": int(ev["timestamp"]),
+            }
+            self.shadow_pending.pop(c.mint, None)
+            self.shadow_positions[c.mint] = fill
+            self.j.write("sniper_shadow_entries", fill)
+            return
+        if side_buy and signature != c.create_signature and c.first_buy_signature is None:
+            trader = ev.get("user")
+            if trader and trader == c.creator:
+                return
+            self.shadow_pending[c.mint] = {
+                "signal_signature": signature, "signal_timestamp": int(ev["timestamp"]),
+                "signal_wallet": trader,
+            }
+            self.j.write("sniper_shadow_decisions", {
+                "mint": c.mint, "decision": "first_buy_signal",
+                "signal_signature": signature, "signal_wallet": trader,
+                "signal_timestamp": int(ev["timestamp"]), "signal_t_plus": t,
+            })
+
+    def _close_shadow(self, mint: str, price: float, timestamp: int, t_plus: int,
+                      signature: str, reason: str, stale_seconds: int):
+        p = self.shadow_positions.pop(mint, None)
+        if not p:
+            return
+        exit_fill = price * (1.0 - EXIT_SLIPPAGE)
+        net_mult = (exit_fill / p["entry_fill_price_sol"]) * ((1.0 - FEE_RATE) ** 2)
+        net_pnl = p["stake_usd"] * (net_mult - 1.0) - ROUND_TRIP_GAS_USD
+        self.j.write("sniper_shadow_trades", {
+            **p, "exit_price_sol": price, "exit_fill_price_sol": exit_fill,
+            "exit_timestamp": timestamp, "exit_t_plus": t_plus, "exit_signature": signature,
+            "exit_reason": reason, "hold_seconds": timestamp - p["entry_timestamp"],
+            "market_move_at_exit": round(price / p["entry_price_sol"] - 1.0, 6),
+            "net_pnl_usd": round(net_pnl, 6), "exit_price_stale_seconds": stale_seconds,
+        })
+
+    def timer_tick(self, now: float | None = None):
+        """Apply max-hold exits even if a token receives no further transactions."""
+        now = time.time() if now is None else now
+        if self.position:
+            p = self.position
+            if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
+                self._close_baseline_time_cap(max(0, int(now - p.get("last_price_timestamp", now))), int(now))
+        for mint, pending in list(self.shadow_pending.items()):
+            if now - pending["signal_timestamp"] > ENTRY_CONFIRM_SECONDS:
+                self.shadow_pending.pop(mint, None)
+                self.j.write("sniper_shadow_decisions", {
+                    "mint": mint, "decision": "expired_no_following_trade",
+                    "delay_seconds": int(now - pending["signal_timestamp"]),
+                })
+        for mint, p in list(self.shadow_positions.items()):
+            if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
+                stale = max(0, int(now - p.get("last_price_timestamp", now)))
+                self._close_shadow(mint, p["last_price_sol"], int(now), 0, "timer", "time_cap_timer", stale)
+
+    def _close_baseline_time_cap(self, stale_seconds: int, timestamp: int):
+        p = self.position
+        if not p:
+            return
+        price = p["last_price_sol"]
+        exit_fill = price * (1.0 - EXIT_SLIPPAGE)
+        net_mult = (exit_fill / p["entry_fill_price_sol"]) * ((1.0 - FEE_RATE) ** 2)
+        net_pnl = p["stake_usd"] * (net_mult - 1.0) - ROUND_TRIP_GAS_USD
+        self.wallet += net_pnl
+        rec = {**p, "exit_price_sol": price, "exit_fill_price_sol": exit_fill,
+               "exit_timestamp": timestamp, "exit_t_plus": None, "exit_signature": "timer",
+               "exit_reason": "time_cap_timer", "hold_seconds": int(timestamp - p["entry_timestamp"]),
+               "gross_return": round(net_mult - 1.0, 6), "net_pnl_usd": round(net_pnl, 6),
+               "wallet_after_usd": round(self.wallet, 6), "market_move_at_exit": round(price / p["entry_price_sol"] - 1.0, 6),
+               "exit_price_stale_seconds": stale_seconds, "entry_slippage": ENTRY_SLIPPAGE,
+               "exit_slippage": EXIT_SLIPPAGE, "fee_rate_each_side": FEE_RATE,
+               "round_trip_gas_usd": ROUND_TRIP_GAS_USD}
+        self.j.write("sniper_trades", rec)
+        self.stats["exits"] += 1
+        self.stats["wins" if net_pnl > 0 else "losses"] += 1
+        self.j.log(f"SNIPER PAPER TIMER EXIT {p['symbol']} net {net_pnl:+.4f}; last quote stale {stale_seconds}s")
+        self.position = None
+        self.open_mint = None
+
     def prune_expired_launches(self):
         """Bound memory: keep each launch through its ten-minute tape window."""
         now = int(time.time())
@@ -240,7 +356,7 @@ class Sniper:
                 self.launches.pop(mint, None)
 
     async def run(self):
-        self.j.log("SNIPER V1 PAPER ONLY: launch-first-buy, next-transaction fill; no signed or live transactions.")
+        self.j.log("SNIPER V2 PAPER ONLY: baseline first-buy plus independent shadow lane; timer-driven exits; no signed or live transactions.")
         self.j.log(f"config discovery={DISCOVERY_SECONDS}s tail={TAIL_SECONDS}s fixed_paper_stake={STAKE_USD:.2f} TP={TAKE_PROFIT:.1%} SL={STOP_LOSS:.1%} max_hold={MAX_HOLD_SECONDS}s; no loss-based shutdown")
         feed = Feed(self.cfg.feed_ws_urls, self.on_events, self.j.log)
         feed_task = asyncio.create_task(feed.run())
@@ -248,6 +364,7 @@ class Sniper:
         try:
             while time.time() < deadline:
                 await asyncio.sleep(1)
+                self.timer_tick()
                 self.prune_expired_launches()
                 self.j.status({
                     "strategy": "pumpfun_launch_sniper_v1", "mode": "paper",
@@ -263,6 +380,7 @@ class Sniper:
                 "strategy": "pumpfun_launch_sniper_v1", "mode": "paper", "wallet_usd": round(self.wallet, 6),
                 "stats": self.stats, "shutdown": True, "launches_tracked": len(self.launches),
                 "open_position_at_shutdown": self.position,
+                "shadow_positions_at_shutdown": list(self.shadow_positions.values()),
             })
             self.j.log("SNIPER shutdown; all observed launch trades have been written to the research tape.")
 
