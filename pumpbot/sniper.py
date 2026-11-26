@@ -15,7 +15,6 @@ DISCOVERY_SECONDS = int(os.environ.get("SNIPER_DISCOVERY_SECONDS", "3600"))
 TAIL_SECONDS = int(os.environ.get("SNIPER_TAIL_SECONDS", "600"))
 STAKE_USD = float(os.environ.get("SNIPER_STAKE_USD", "1.00"))
 START_WALLET_USD = float(os.environ.get("SNIPER_START_WALLET_USD", "10.00"))
-KILL_WALLET_USD = float(os.environ.get("SNIPER_KILL_WALLET_USD", "5.00"))
 TAKE_PROFIT = float(os.environ.get("SNIPER_TAKE_PROFIT", "0.20"))
 STOP_LOSS = float(os.environ.get("SNIPER_STOP_LOSS", "0.12"))
 MAX_HOLD_SECONDS = int(os.environ.get("SNIPER_MAX_HOLD_SECONDS", "30"))
@@ -59,7 +58,6 @@ class Sniper:
         self.wallet = START_WALLET_USD
         self.open_mint: str | None = None
         self.position: dict | None = None
-        self.stopped = False
         self.stats = {
             "creates": 0, "sol_launches": 0, "trades_recorded": 0,
             "first_buy_signals": 0, "entries_filled": 0, "entries_rejected_busy": 0,
@@ -176,7 +174,7 @@ class Sniper:
         c.entry_status = "filled_paper"
         self.open_mint = c.mint
         self.position = {
-            "mint": c.mint, "symbol": c.symbol, "stake_usd": min(STAKE_USD, max(0.0, self.wallet)),
+            "mint": c.mint, "symbol": c.symbol, "stake_usd": STAKE_USD,
             "entry_price_sol": price, "entry_fill_price_sol": entry_fill,
             "entry_timestamp": int(ev["timestamp"]), "entry_t_plus": t,
             "entry_signature": signature, "signal_signature": c.first_buy_signature,
@@ -224,9 +222,6 @@ class Sniper:
             c.exit_status = reason
             self.position = None
             self.open_mint = None
-            if self.wallet <= KILL_WALLET_USD:
-                self.stopped = True
-                self.j.log("SNIPER KILL SWITCH: wallet reached minimum; no further entries.")
 
     def prune_expired_launches(self):
         """Bound memory: keep each launch through its ten-minute tape window."""
@@ -246,12 +241,12 @@ class Sniper:
 
     async def run(self):
         self.j.log("SNIPER V1 PAPER ONLY: launch-first-buy, next-transaction fill; no signed or live transactions.")
-        self.j.log(f"config discovery={DISCOVERY_SECONDS}s tail={TAIL_SECONDS}s stake {STAKE_USD:.2f} TP={TAKE_PROFIT:.1%} SL={STOP_LOSS:.1%} max_hold={MAX_HOLD_SECONDS}s")
+        self.j.log(f"config discovery={DISCOVERY_SECONDS}s tail={TAIL_SECONDS}s fixed_paper_stake={STAKE_USD:.2f} TP={TAKE_PROFIT:.1%} SL={STOP_LOSS:.1%} max_hold={MAX_HOLD_SECONDS}s; no loss-based shutdown")
         feed = Feed(self.cfg.feed_ws_urls, self.on_events, self.j.log)
         feed_task = asyncio.create_task(feed.run())
         deadline = self.started + DISCOVERY_SECONDS + TAIL_SECONDS
         try:
-            while time.time() < deadline and not self.stopped:
+            while time.time() < deadline:
                 await asyncio.sleep(1)
                 self.prune_expired_launches()
                 self.j.status({
