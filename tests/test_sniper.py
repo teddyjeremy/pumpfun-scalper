@@ -1,5 +1,3 @@
-import json
-
 from pumpbot.config import Config
 from pumpbot.sniper import Sniper
 
@@ -22,7 +20,6 @@ def create_event():
 
 
 def trade_event(ts, *, buy=True, price_mult=1.0, user=BUYER):
-    # spot = (virtual SOL / 1e9) / (virtual token / 1e6)
     return ("trade", {
         "mint": MINT, "timestamp": ts, "creator": CREATOR, "user": user,
         "is_buy": buy, "quote_mint": "SOL", "sol_amount": 100_000_000,
@@ -33,7 +30,7 @@ def trade_event(ts, *, buy=True, price_mult=1.0, user=BUYER):
 
 def test_spot_sol_uses_virtual_curve_reserves():
     assert Sniper.spot_sol({"virtual_sol_reserves": 40_000_000_000,
-                            "virtual_token_reserves": 800_000_000_000_000}) == 0.00005
+                            "virtual_token_reserves": 800_000_000_000_000}) == 0.00000005
 
 
 def test_first_buy_signal_then_next_transaction_fills_paper_entry(tmp_path):
@@ -61,10 +58,7 @@ def test_position_exits_on_take_profit_and_accounts_for_costs(tmp_path):
     bot.on_events([create_event()], "create-sig", 1, bot.started)
     bot.on_events([trade_event(1001)], "first-buy-sig", 2, bot.started + 1)
     bot.on_events([trade_event(1002, buy=False)], "entry-fill-sig", 3, bot.started + 2)
-    entry = bot.position["entry_price_sol"]
-    # A subsequent observed trade 21% above the paper entry triggers the TP.
-    exit_price_mult = 1.21
-    bot.on_events([trade_event(1003, price_mult=exit_price_mult)], "exit-sig", 4, bot.started + 3)
+    bot.on_events([trade_event(1003, price_mult=1.21)], "exit-sig", 4, bot.started + 3)
     assert bot.position is None
     assert bot.stats["exits"] == 1
     assert bot.stats["wins"] == 1
