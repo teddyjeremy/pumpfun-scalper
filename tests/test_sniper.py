@@ -356,12 +356,12 @@ def test_high_conviction_lane_uses_conservative_entry_and_exit_marks(tmp_path):
     bot = make_sniper(tmp_path)
     bot.on_events([create_event()], "create-sig", 1, bot.started)
     bot.on_events([
-        dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000),
-        dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000),
+        ("trade", dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000)),
     ], "v2-signal", 2, bot.started + 1)
     bot.on_events([
-        dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000),
-        dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000),
+        ("trade", dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000)),
     ], "v2-confirmation", 3, bot.started + 2)
     entry_events = [
         trade_event(1003, user=BUYER, price_mult=1.20),
