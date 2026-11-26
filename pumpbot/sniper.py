@@ -64,6 +64,9 @@ class Sniper:
         # at least two distinct non-creator buyers. Baseline and broad shadow stay unchanged.
         self.cluster_pending: dict[str, dict] = {}
         self.cluster_positions: dict[str, dict] = {}
+        # One-position portfolio lane: same multi-buyer rule, but a shared single slot.
+        self.cluster_portfolio_pending: dict[str, dict] = {}
+        self.cluster_portfolio_position: dict | None = None
         self.stats = {
             "creates": 0, "sol_launches": 0, "trades_recorded": 0,
             "first_buy_signals": 0, "entries_filled": 0, "entries_rejected_busy": 0,
@@ -124,6 +127,7 @@ class Sniper:
                     continue
                 self._shadow_process(c, ev, signature, price, t)
                 self._cluster_process(c, ev, signature, price, t)
+                self._cluster_portfolio_process(c, ev, signature, price, t)
                 self._trade_launch(c, ev, signature, price, t)
             elif kind == "complete":
                 c = self.launches.get(ev["mint"])
@@ -369,6 +373,104 @@ class Sniper:
                 "signal_sell_count": 0,
             }
 
+
+    def _cluster_portfolio_process(self, c: Launch, ev: dict, signature: str, price: float, t: int):
+        """Multi-buyer strategy with one shared open paper position across all mints."""
+        side_buy = bool(ev.get("is_buy"))
+        trader = ev.get("user")
+        pos = self.cluster_portfolio_position
+        if pos and pos["mint"] == c.mint:
+            if signature == pos["entry_signature"]:
+                return
+            pos["last_price_sol"] = price
+            pos["last_price_timestamp"] = int(ev["timestamp"])
+            move = price / pos["entry_price_sol"] - 1.0
+            held = int(ev["timestamp"]) - pos["entry_timestamp"]
+            reason = "take_profit" if move >= TAKE_PROFIT else "stop_loss" if move <= -STOP_LOSS else "time_cap" if held >= MAX_HOLD_SECONDS else None
+            if reason:
+                self._close_cluster_portfolio(price, int(ev["timestamp"]), t, signature, reason, 0)
+            return
+
+        pending = self.cluster_portfolio_pending.get(c.mint)
+        if pending:
+            if signature == pending["signal_signature"]:
+                if side_buy and trader and trader != c.creator:
+                    pending["signal_buyers"].add(trader)
+                    pending["signal_buy_count"] += 1
+                elif not side_buy:
+                    pending["signal_sell_count"] += 1
+                return
+            delay = int(ev["timestamp"]) - pending["signal_timestamp"]
+            if delay > ENTRY_CONFIRM_SECONDS:
+                self.cluster_portfolio_pending.pop(c.mint, None)
+                self.j.write("sniper_cluster_portfolio_decisions", {
+                    "mint": c.mint, "decision": "expired_no_following_transaction",
+                    "delay_seconds": delay,
+                    "signal_transaction_buyer_count": len(pending["signal_buyers"]),
+                })
+                return
+            buyer_count = len(pending["signal_buyers"])
+            if buyer_count < 2:
+                self.cluster_portfolio_pending.pop(c.mint, None)
+                self.j.write("sniper_cluster_portfolio_decisions", {
+                    "mint": c.mint, "decision": "rejected_single_buyer_signal_transaction",
+                    "signal_transaction_buyer_count": buyer_count,
+                })
+                return
+            if self.cluster_portfolio_position is not None:
+                self.cluster_portfolio_pending.pop(c.mint, None)
+                self.j.write("sniper_cluster_portfolio_decisions", {
+                    "mint": c.mint, "decision": "rejected_portfolio_busy",
+                    "signal_transaction_buyer_count": buyer_count,
+                    "occupied_mint": self.cluster_portfolio_position["mint"],
+                })
+                return
+            fill = {
+                "mint": c.mint, "symbol": c.symbol, "signal_wallet": pending["signal_wallet"],
+                "signal_signature": pending["signal_signature"], "signal_timestamp": pending["signal_timestamp"],
+                "signal_transaction_buyer_count": buyer_count,
+                "signal_transaction_buy_count": pending["signal_buy_count"],
+                "signal_transaction_sell_count": pending["signal_sell_count"],
+                "entry_signature": signature, "entry_timestamp": int(ev["timestamp"]),
+                "entry_t_plus": t, "entry_delay_seconds": delay, "stake_usd": STAKE_USD,
+                "entry_price_sol": price, "entry_fill_price_sol": price * (1.0 + ENTRY_SLIPPAGE),
+                "last_price_sol": price, "last_price_timestamp": int(ev["timestamp"]),
+            }
+            self.cluster_portfolio_pending.pop(c.mint, None)
+            self.cluster_portfolio_position = fill
+            self.j.write("sniper_cluster_portfolio_entries", fill)
+            self.j.write("sniper_cluster_portfolio_decisions", {
+                "mint": c.mint, "decision": "accepted_multi_buyer_signal_transaction",
+                "signal_transaction_buyer_count": buyer_count,
+            })
+            return
+
+        if side_buy and signature != c.create_signature and c.first_buy_signature is None:
+            if trader and trader == c.creator:
+                return
+            self.cluster_portfolio_pending[c.mint] = {
+                "signal_signature": signature, "signal_timestamp": int(ev["timestamp"]),
+                "signal_wallet": trader, "signal_buyers": {trader} if trader else set(),
+                "signal_buy_count": 1, "signal_sell_count": 0,
+            }
+
+    def _close_cluster_portfolio(self, price: float, timestamp: int, t_plus: int,
+                                 signature: str, reason: str, stale_seconds: int):
+        p = self.cluster_portfolio_position
+        if not p:
+            return
+        exit_fill = price * (1.0 - EXIT_SLIPPAGE)
+        net_mult = (exit_fill / p["entry_fill_price_sol"]) * ((1.0 - FEE_RATE) ** 2)
+        net_pnl = p["stake_usd"] * (net_mult - 1.0) - ROUND_TRIP_GAS_USD
+        self.j.write("sniper_cluster_portfolio_trades", {
+            **p, "exit_price_sol": price, "exit_fill_price_sol": exit_fill,
+            "exit_timestamp": timestamp, "exit_t_plus": t_plus, "exit_signature": signature,
+            "exit_reason": reason, "hold_seconds": timestamp - p["entry_timestamp"],
+            "market_move_at_exit": round(price / p["entry_price_sol"] - 1.0, 6),
+            "net_pnl_usd": round(net_pnl, 6), "exit_price_stale_seconds": stale_seconds,
+        })
+        self.cluster_portfolio_position = None
+
     def _close_shadow(self, mint: str, price: float, timestamp: int, t_plus: int,
                       signature: str, reason: str, stale_seconds: int):
         p = self.shadow_positions.pop(mint, None)
@@ -420,6 +522,19 @@ class Sniper:
             if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
                 stale = max(0, int(now - p.get("last_price_timestamp", now)))
                 self._close_shadow(mint, p["last_price_sol"], int(now), 0, "timer", "time_cap_timer", stale)
+        for mint, pending in list(self.cluster_portfolio_pending.items()):
+            if now - pending["signal_timestamp"] > ENTRY_CONFIRM_SECONDS:
+                self.cluster_portfolio_pending.pop(mint, None)
+                self.j.write("sniper_cluster_portfolio_decisions", {
+                    "mint": mint, "decision": "expired_no_following_transaction",
+                    "delay_seconds": int(now - pending["signal_timestamp"]),
+                    "signal_transaction_buyer_count": len(pending["signal_buyers"]),
+                })
+        if self.cluster_portfolio_position:
+            p = self.cluster_portfolio_position
+            if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
+                stale = max(0, int(now - p.get("last_price_timestamp", now)))
+                self._close_cluster_portfolio(p["last_price_sol"], int(now), 0, "timer", "time_cap_timer", stale)
         for mint, pending in list(self.cluster_pending.items()):
             if now - pending["signal_timestamp"] > ENTRY_CONFIRM_SECONDS:
                 self.cluster_pending.pop(mint, None)
@@ -500,6 +615,7 @@ class Sniper:
                 "open_position_at_shutdown": self.position,
                 "shadow_positions_at_shutdown": list(self.shadow_positions.values()),
                 "cluster_positions_at_shutdown": list(self.cluster_positions.values()),
+                "cluster_portfolio_position_at_shutdown": self.cluster_portfolio_position,
             })
             self.j.log("SNIPER shutdown; all observed launch trades have been written to the research tape.")
 
