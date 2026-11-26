@@ -246,6 +246,8 @@ def test_transaction_summary_uses_final_event_price_and_distinct_wallets(tmp_pat
     assert row["buy_count"] == 2
     assert row["final_price_sol"] == bot.spot_sol(events[-1][1])
     assert row["intra_transaction_price_move"] == 0.25
+    assert row["first_virtual_sol_reserves_raw"] == events[0][1]["virtual_sol_reserves"]
+    assert row["final_virtual_sol_reserves_raw"] == events[-1][1]["virtual_sol_reserves"]
 
 
 def test_transaction_complete_lane_fills_at_final_price_of_followup_transaction(tmp_path):
@@ -415,3 +417,19 @@ def test_high_conviction_lane_timer_exit_records_stale_quote_age(tmp_path):
     assert len(trades) == 1
     assert trades[0]["exit_reason"] == "time_cap_timer"
     assert trades[0]["exit_price_stale_seconds"] == 30
+
+
+
+def test_transaction_capture_records_feed_latency_and_observation_sequence(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([
+        ("trade", trade_event(1001, user=BUYER)[1]),
+        ("trade", trade_event(1001, user=BUYER2)[1]),
+    ], "latency-sig", 2, 1001.375)
+
+    rows = bot.j.read_kind("sniper_transactions")
+    assert len(rows) == 1
+    assert rows[0]["feed_latency_seconds"] == 0.375
+    assert rows[0]["observed_at_epoch"] == 1001.375
+    assert rows[0]["observation_sequence"] > 0

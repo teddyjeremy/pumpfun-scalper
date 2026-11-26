@@ -166,6 +166,8 @@ class Sniper:
         self.transaction_sequence += 1
         for tx_summary in build_transaction_summaries(events, self.launches, signature, slot):
             tx_summary["observation_sequence"] = self.transaction_sequence
+            tx_summary["observed_at_epoch"] = round(received_at, 6)
+            tx_summary["feed_latency_seconds"] = round(received_at - tx_summary["timestamp"], 6)
             self.j.write("sniper_transactions", tx_summary)
             self.tx_lane.process(tx_summary)
             self.v2_lane.process(tx_summary)
