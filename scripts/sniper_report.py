@@ -116,6 +116,7 @@ def main():
     tx_multi_event_count = sum(1 for x in tx_summaries if int(x.get("event_count") or 0) > 1)
     tx_missing_final_price = sum(1 for x in tx_summaries if not x.get("final_price_sol"))
     tx_abs_moves = [abs(float(x["intra_transaction_price_move"])) for x in tx_summaries if x.get("intra_transaction_price_move") is not None]
+    feed_latencies = sorted(float(x["feed_latency_seconds"]) for x in tx_summaries if x.get("feed_latency_seconds") is not None)
     tx_cohorts, tx_wallets = {}, {}
     for row in tx_trades:
         pnl = float(row.get("net_pnl_usd", 0))
@@ -192,6 +193,10 @@ def main():
             "transaction_multi_event_count": tx_multi_event_count,
             "transaction_missing_final_price_count": tx_missing_final_price,
             "transaction_mean_abs_intra_move": mean(tx_abs_moves) if tx_abs_moves else None,
+            "feed_latency_median_seconds": feed_latencies[len(feed_latencies) // 2] if feed_latencies else None,
+            "feed_latency_p90_seconds": feed_latencies[int(0.90 * (len(feed_latencies) - 1))] if feed_latencies else None,
+            "feed_latency_max_seconds": max(feed_latencies) if feed_latencies else None,
+            "feed_latency_negative_count": sum(1 for x in feed_latencies if x < 0),
         },
         "transaction_lane_top_cohorts": tx_cohort_ranked[:20],
         "transaction_lane_top_wallets": tx_wallet_ranked[:20],
@@ -237,6 +242,8 @@ def main():
         f"- Multi-event transaction summaries: **{summary['capture_quality']['transaction_multi_event_count']}**",
         f"- Transaction summaries missing a final price: **{summary['capture_quality']['transaction_missing_final_price_count']}**",
         f"- Mean absolute within-transaction price movement: **{summary['capture_quality']['transaction_mean_abs_intra_move']:.2%}**" if summary["capture_quality"]["transaction_mean_abs_intra_move"] is not None else "- Mean absolute within-transaction price movement: n/a",
+        f"- Feed callback latency median / p90 / max: **{summary['capture_quality']['feed_latency_median_seconds']:.3f}s / {summary['capture_quality']['feed_latency_p90_seconds']:.3f}s / {summary['capture_quality']['feed_latency_max_seconds']:.3f}s**" if summary["capture_quality"]["feed_latency_median_seconds"] is not None else "- Feed callback latency: n/a",
+        f"- Negative timestamp-difference observations (second-resolution block timestamps): **{summary['capture_quality']['feed_latency_negative_count']}**",
         "", "## Paper results",
         f"- Entries: **{summary['paper_entries']}**",
         f"- Closed trades: **{summary['closed_trades']}**",
