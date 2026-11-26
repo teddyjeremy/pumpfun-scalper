@@ -163,6 +163,16 @@ def main() -> None:
 
     write_csv(os.path.join(args.out, "coins.csv"), coins)
     write_csv(os.path.join(args.out, "coin_summaries.csv"), summaries)
+    write_csv(os.path.join(args.out, "candidate_tape_coverage.csv"), [
+        {
+            "mint": x.get("mint"), "symbol": x.get("symbol"),
+            "capture_reason": x.get("capture_reason"), "capture_t_plus": x.get("capture_t_plus"),
+            "entry_filled": x.get("entry_filled"), "trade_count": x.get("trade_count"),
+            "observed_seconds": x.get("observed_seconds"),
+            "observation_complete": x.get("observation_complete"),
+        }
+        for x in summaries
+    ])
     write_csv(os.path.join(args.out, "coin_raw_tape.csv"), raw_tape)
     write_csv(os.path.join(args.out, "coin_decisions.csv"), decisions)
     write_csv(os.path.join(args.out, "missed_opportunities.csv"), missed)
@@ -177,6 +187,8 @@ def main() -> None:
         "warning": "Post-decision peak is an upper-bound diagnostic, not an executable fill or proof of profitability. End-price estimates still omit latency and market impact.",
         "coins_detected": len(coins), "coins_with_summaries": len(summaries),
         "coins_captured_for_full_observation": len({x.get("mint") for x in summaries}),
+        "research_candidate_captures": sum(1 for x in summaries if str(x.get("capture_reason") or "").startswith("research_candidate:")),
+        "filled_entry_captures": sum(1 for x in summaries if x.get("entry_filled")),
         "coins_with_complete_ten_minute_observation": sum(1 for x in summaries if x.get("observation_complete")),
         "coins_with_incomplete_ten_minute_observation": sum(1 for x in summaries if not x.get("observation_complete")),
         "exit_counterfactual_rows": len(exit_counterfactuals),
@@ -193,8 +205,8 @@ def main() -> None:
         "risk_gate_missed_completed": len(risk_missed), "risk_gate_missed_profitable": len(risk_profitable),
         "limitations": [
             "Only coins whose create event was observed by this WebSocket feed can be analyzed; missed create events cannot be reconstructed.",
-            "Full priced and raw ten-minute tapes are stored only after an accepted entry is actually filled. Untraded coins retain creation, decision, signal and shadow records, not full future price tapes.",
-            "Rejected-decision future-price analysis is consequently limited to mints that also have a captured traded-coin tape; it is not a complete scan of all rejected coins.",
+            "Full priced and raw ten-minute tapes are stored for accepted filled entries and for coins whose baseline K/B signal meets a predeclared research-candidate filter. Other untraded coins retain lightweight creation, decision, signal and shadow records only.",
+            "Rejected-decision future-price analysis is limited to mints with a filled-entry or research-candidate tape; it is not a complete scan of all rejected coins.",
             "Exit counterfactuals reuse the actual entry price and recorded post-entry tape. They are offline simulations, not changes to live/paper exit decisions; no-trigger rows are observation-end mark-to-market, not executable exits.",
             "Decision diagnostics explain configured Lane K/B and shared guard rejections at each completed second in the entry window.",
             "A future peak is an upper bound and must not be interpreted as a realizable trade; use observation-end return as the less optimistic comparison.",
@@ -214,8 +226,13 @@ def main() -> None:
         f"- Stored priced trade observations: {len(tape)}", f"- Stored raw on-chain trade events: {len(raw_tape)}",
         f"- Entry-window decision samples: {len(decisions)}", "",
         "## Selective collection", "",
+        "- Full tapes are retained for accepted fills and for research-only candidates matching pullback, participation, or multi-window recovery rules.",
+        "- Candidate tape retention does not create an entry, alter a K/B decision, or affect the paper wallet.",
+        "- See candidate_tape_coverage.csv for each captured mint and its reason.",
         f"- Coins detected: {len(coins)}",
-        f"- Coins captured after a filled entry: {report['coins_captured_for_full_observation']}",
+        f"- Coins with a full tape: {report['coins_captured_for_full_observation']}",
+        f"- Research-candidate captures: {report['research_candidate_captures']}",
+        f"- Coins with an accepted filled entry: {report['filled_entry_captures']}",
         f"- Complete ten-minute observations: {report['coins_with_complete_ten_minute_observation']}",
         f"- Incomplete ten-minute observations: {report['coins_with_incomplete_ten_minute_observation']}",
         "",
