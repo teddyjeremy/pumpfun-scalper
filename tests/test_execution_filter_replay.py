@@ -52,6 +52,7 @@ def test_execution_filter_preserves_full_transaction_stream_and_timer_exit():
         tx(mint, "signal", 100, 1, buy_sol=0.8),
         tx(mint, "confirm", 101, 2, buy_sol=0.8, move=0.10),
         tx(mint, "entry", 102, 3, buyers=2, buy_sol=0.8),
+        tx("unrelated", "later", 132, 4, buyers=0, buy_sol=0, net=-1, buy_count=0),
     ]
     result = replay(rows)
     lane = next(x for x in result["variants"] if x["variant"] == "execution_buy_0_5_sol")
