@@ -48,7 +48,7 @@ jobs:
       - name: Checkout sniper branch
         uses: actions/checkout@v4
         with:
-          ref: feature/pumpfun-launch-sniper-v1
+          ref: ${{ github.sha }}
 
       - name: Check Helius secret exists
         shell: bash
