@@ -184,3 +184,47 @@ def test_multi_buyer_cluster_lane_rejects_single_buyer_signal_transaction(tmp_pa
     decisions = bot.j.read_kind("sniper_cluster_decisions")
     assert decisions[-1]["decision"] == "rejected_single_buyer_signal_transaction"
     assert decisions[-1]["signal_transaction_buyer_count"] == 1
+
+
+def test_multi_buyer_one_position_portfolio_enforces_shared_slot_and_timer_exit(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001, user=BUYER)], "signal-tx", 2, bot.started + 1)
+    bot.on_events([trade_event(1001, user=BUYER2)], "signal-tx", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, buy=False)], "entry-tx", 3, bot.started + 2)
+
+    assert bot.cluster_portfolio_position is not None
+    assert bot.cluster_portfolio_position["mint"] == MINT
+    assert len(bot.j.read_kind("sniper_cluster_portfolio_entries")) == 1
+
+    second_mint = "SecondMint111111111111111111111111111111111"
+    second_create = dict(create_event()[1], mint=second_mint, symbol="SECOND")
+    bot.on_events([("create", second_create)], "second-create", 4, bot.started + 3)
+    bot.on_events([("trade", dict(trade_event(1003, user=BUYER)[1], mint=second_mint))],
+                  "second-signal", 5, bot.started + 4)
+    bot.on_events([("trade", dict(trade_event(1003, user=BUYER2)[1], mint=second_mint))],
+                  "second-signal", 5, bot.started + 4)
+    bot.on_events([("trade", dict(trade_event(1004, buy=False)[1], mint=second_mint))],
+                  "second-entry", 6, bot.started + 5)
+
+    decisions = bot.j.read_kind("sniper_cluster_portfolio_decisions")
+    assert any(x["decision"] == "rejected_portfolio_busy" and x["mint"] == second_mint for x in decisions)
+    assert bot.cluster_portfolio_position["mint"] == MINT
+
+    bot.timer_tick(1033)
+    assert bot.cluster_portfolio_position is None
+    trades = bot.j.read_kind("sniper_cluster_portfolio_trades")
+    assert len(trades) == 1
+    assert trades[0]["exit_reason"] == "time_cap_timer"
+    assert trades[0]["exit_price_stale_seconds"] == 31
+
+
+def test_multi_buyer_one_position_portfolio_rejects_single_buyer_signal(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001, user=BUYER)], "signal-tx", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, buy=False)], "entry-tx", 3, bot.started + 2)
+
+    assert bot.cluster_portfolio_position is None
+    decisions = bot.j.read_kind("sniper_cluster_portfolio_decisions")
+    assert decisions[-1]["decision"] == "rejected_single_buyer_signal_transaction"
