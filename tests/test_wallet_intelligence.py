@@ -1,4 +1,4 @@
-from pumpbot_wallet_intelligence import build_outcomes, wallet_profile
+from scripts.wallet_intelligence import build_outcomes, wallet_profile
 
 
 def test_outcomes_require_complete_tape_and_matured_horizon():
