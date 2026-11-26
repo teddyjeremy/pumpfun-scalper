@@ -11,6 +11,7 @@ from .events import SOL
 from .feed import Feed
 from .journal import Journal
 from .transaction_intel import TransactionAwareLane, build_transaction_summaries
+from .confirmation_lane import HighConvictionConfirmationLane
 
 DISCOVERY_SECONDS = int(os.environ.get("SNIPER_DISCOVERY_SECONDS", "3600"))
 TAIL_SECONDS = int(os.environ.get("SNIPER_TAIL_SECONDS", "600"))
@@ -24,6 +25,9 @@ ENTRY_SLIPPAGE = float(os.environ.get("SNIPER_ENTRY_SLIPPAGE", "0.015"))
 EXIT_SLIPPAGE = float(os.environ.get("SNIPER_EXIT_SLIPPAGE", "0.015"))
 FEE_RATE = float(os.environ.get("SNIPER_FEE_RATE", "0.0125"))
 ROUND_TRIP_GAS_USD = float(os.environ.get("SNIPER_GAS_USD", "0.0285"))
+V2_CONFIRMATION_MIN_BUYERS = int(os.environ.get("SNIPER_V2_CONFIRMATION_MIN_BUYERS", "2"))
+V2_CONFIRMATION_MIN_BUY_SOL = float(os.environ.get("SNIPER_V2_CONFIRMATION_MIN_BUY_SOL", "0.50"))
+V2_CONFIRMATION_MIN_INTRA_MOVE = float(os.environ.get("SNIPER_V2_CONFIRMATION_MIN_INTRA_MOVE", "0.05"))
 
 
 @dataclass
@@ -74,6 +78,17 @@ class Sniper:
             max_hold_seconds=MAX_HOLD_SECONDS, confirm_seconds=ENTRY_CONFIRM_SECONDS,
             entry_slippage=ENTRY_SLIPPAGE, exit_slippage=EXIT_SLIPPAGE,
             fee_rate=FEE_RATE, gas_usd=ROUND_TRIP_GAS_USD,
+        )
+        # Separate stricter lane: signal -> strong confirmation -> later execution.
+        self.transaction_sequence = 0
+        self.v2_lane = HighConvictionConfirmationLane(
+            self.j, stake_usd=STAKE_USD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS,
+            max_hold_seconds=MAX_HOLD_SECONDS, confirm_seconds=ENTRY_CONFIRM_SECONDS,
+            entry_slippage=ENTRY_SLIPPAGE, exit_slippage=EXIT_SLIPPAGE,
+            fee_rate=FEE_RATE, gas_usd=ROUND_TRIP_GAS_USD,
+            min_confirmation_buyers=V2_CONFIRMATION_MIN_BUYERS,
+            min_confirmation_buy_sol=V2_CONFIRMATION_MIN_BUY_SOL,
+            min_confirmation_move=V2_CONFIRMATION_MIN_INTRA_MOVE,
         )
         self.stats = {
             "creates": 0, "sol_launches": 0, "trades_recorded": 0,
@@ -148,9 +163,12 @@ class Sniper:
 
         # Feed callbacks contain all decoded events for one Solana signature.
         # Aggregate after legacy lanes, then run the isolated transaction-complete lane.
+        self.transaction_sequence += 1
         for tx_summary in build_transaction_summaries(events, self.launches, signature, slot):
+            tx_summary["observation_sequence"] = self.transaction_sequence
             self.j.write("sniper_transactions", tx_summary)
             self.tx_lane.process(tx_summary)
+            self.v2_lane.process(tx_summary)
 
     def _trade_launch(self, c: Launch, ev: dict, signature: str, price: float, t: int):
         side_buy = bool(ev.get("is_buy"))
@@ -522,6 +540,7 @@ class Sniper:
         """Apply max-hold exits even if a token receives no further transactions."""
         now = time.time() if now is None else now
         self.tx_lane.timer_tick(now)
+        self.v2_lane.timer_tick(now)
         if self.position:
             p = self.position
             if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
@@ -604,7 +623,7 @@ class Sniper:
                 self.launches.pop(mint, None)
 
     async def run(self):
-        self.j.log("SNIPER V2 PAPER ONLY: baseline first-buy plus independent shadow lane; timer-driven exits; no signed or live transactions.")
+        self.j.log("SNIPER PAPER ONLY: baseline and isolated research lanes; high-conviction lane requires signal, strong confirmation, then a later execution transaction; no signed or live transactions.")
         self.j.log(f"config discovery={DISCOVERY_SECONDS}s tail={TAIL_SECONDS}s fixed_paper_stake={STAKE_USD:.2f} TP={TAKE_PROFIT:.1%} SL={STOP_LOSS:.1%} max_hold={MAX_HOLD_SECONDS}s; no loss-based shutdown")
         feed = Feed(self.cfg.feed_ws_urls, self.on_events, self.j.log)
         feed_task = asyncio.create_task(feed.run())
@@ -633,6 +652,8 @@ class Sniper:
                 "cluster_portfolio_position_at_shutdown": self.cluster_portfolio_position,
                 "transaction_lane_position_at_shutdown": self.tx_lane.position,
                 "transaction_lane_pending_count_at_shutdown": len(self.tx_lane.pending),
+                "high_conviction_position_at_shutdown": self.v2_lane.position,
+                "high_conviction_pending_count_at_shutdown": len(self.v2_lane.pending),
             })
             self.j.log("SNIPER shutdown; all observed launch trades have been written to the research tape.")
 
