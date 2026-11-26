@@ -5,6 +5,7 @@ from pumpbot.sniper import Sniper
 MINT = "2u2py6mMFuMs9GdxuWMB24WSDrKS9HAwuc3GSvrTpump"
 CREATOR = "D9gQ6RhKEpnobPBUdWY5bPQt2p3zGk3iVz6ChpUi2ArA"
 BUYER = "8h2Q6RhKEpnobPBUdWY5bPQt2p3zGk3iVz6ChpUi2ArB"
+BUYER2 = "9h2Q6RhKEpnobPBUdWY5bPQt2p3zGk3iVz6ChpUi2ArC"
 
 
 def make_sniper(tmp_path):
@@ -144,3 +145,42 @@ def test_shadow_timer_exit_records_stale_quote_age(tmp_path):
     assert len(rows) == 1
     assert rows[0]["exit_reason"] == "time_cap_timer"
     assert rows[0]["exit_price_stale_seconds"] == 31
+
+
+def test_multi_buyer_cluster_lane_requires_two_buyers_in_signal_transaction(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+
+    # Two distinct non-creator buyers are emitted under the same transaction signature.
+    bot.on_events([trade_event(1001, user=BUYER)], "signal-tx", 2, bot.started + 1)
+    bot.on_events([trade_event(1001, user=BUYER2)], "signal-tx", 2, bot.started + 1)
+    assert MINT in bot.cluster_pending
+    assert len(bot.cluster_pending[MINT]["signal_buyers"]) == 2
+    assert MINT not in bot.cluster_positions
+
+    # The next transaction is the simulated entry, as in the existing shadow model.
+    bot.on_events([trade_event(1002, buy=False, user=BUYER2)], "next-tx", 3, bot.started + 2)
+    assert MINT in bot.cluster_positions
+    entry = bot.j.read_kind("sniper_cluster_entries")[0]
+    assert entry["signal_transaction_buyer_count"] == 2
+    assert entry["signal_transaction_buy_count"] == 2
+    assert entry["signal_transaction_sell_count"] == 0
+
+    # Cluster lane has its own timer-driven exit and does not change baseline logic.
+    bot.timer_tick(1033)
+    trades = bot.j.read_kind("sniper_cluster_trades")
+    assert len(trades) == 1
+    assert trades[0]["exit_reason"] == "time_cap_timer"
+    assert trades[0]["exit_price_stale_seconds"] == 31
+
+
+def test_multi_buyer_cluster_lane_rejects_single_buyer_signal_transaction(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001, user=BUYER)], "signal-tx", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, buy=False)], "next-tx", 3, bot.started + 2)
+
+    assert MINT not in bot.cluster_positions
+    decisions = bot.j.read_kind("sniper_cluster_decisions")
+    assert decisions[-1]["decision"] == "rejected_single_buyer_signal_transaction"
+    assert decisions[-1]["signal_transaction_buyer_count"] == 1
