@@ -314,8 +314,8 @@ def test_high_conviction_lane_requires_signal_confirmation_then_later_execution(
     assert bot.v2_lane.pending[MINT]["stage"] == "signal"
 
     confirmation = [
-        ("trade", dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000)),
-        ("trade", dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000)),
+        dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000),
+        dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000),
     ]
     bot.on_events([("trade", x) for x in confirmation], "v2-confirmation", 3, bot.started + 2)
     assert bot.v2_lane.position is None
