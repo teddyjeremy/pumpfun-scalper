@@ -5,8 +5,9 @@ Research only. Replays recorded, selectively captured coin tapes through the
 same CoinEngine fill/exit model. Each variant has one portfolio-wide position.
 """
 from __future__ import annotations
-import argparse, csv, json, os, statistics
+import argparse, csv, json, os, statistics, sys
 from collections import defaultdict
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pumpbot.config import Config
 from pumpbot.engine import CoinEngine
 from pumpbot.tape import Tape
@@ -108,7 +109,7 @@ def replay_variant(variant, cfg, coin_rows, tape_rows, raw_rows, scores):
     for r in raw_rows:
         key = (r.get("mint"), int(r.get("block_timestamp") or 0), r.get("trader"),
                r.get("side"), int(r.get("slot") or 0))
-        raw_lookup[key] = r
+        raw_lookup.setdefault(key, []).append(r)
     by_mint = defaultdict(list)
     for r in tape_rows:
         if r.get("mint") in complete and r.get("price_usd"):
@@ -131,7 +132,8 @@ def replay_variant(variant, cfg, coin_rows, tape_rows, raw_rows, scores):
         for index, r in enumerate(rows):
             bt = int(r.get("bt") or 0)
             raw_key = (mint, bt, r.get("trader"), r.get("side"), int(r.get("slot") or 0))
-            raw_event = raw_lookup.get(raw_key, {})
+            raw_matches = raw_lookup.get(raw_key, [])
+            raw_event = raw_matches.pop(0) if raw_matches else {}
             tok_raw = raw_event.get("token_amount_raw")
             tok = float(tok_raw) / 1e6 if tok_raw is not None else 0.0
             trade = {
