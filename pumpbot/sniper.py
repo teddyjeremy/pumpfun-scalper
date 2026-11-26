@@ -44,8 +44,6 @@ class Launch:
     entry_signature: str | None = None
     exit_status: str | None = None
     observed_trades: int = 0
-    buyers: set[str] = field(default_factory=set)
-    sellers: set[str] = field(default_factory=set)
 
 
 class Sniper:
@@ -108,8 +106,6 @@ class Sniper:
                 c.observed_trades += 1
                 trader = ev.get("user")
                 side = "buy" if ev.get("is_buy") else "sell"
-                if trader:
-                    (c.buyers if side == "buy" else c.sellers).add(trader)
                 self.stats["trades_recorded"] += 1
                 self.j.write("sniper_tape", {
                     "mint": c.mint, "symbol": c.symbol, "t_plus": t, "block_timestamp": int(ev["timestamp"]),
@@ -232,6 +228,22 @@ class Sniper:
                 self.stopped = True
                 self.j.log("SNIPER KILL SWITCH: wallet reached minimum; no further entries.")
 
+    def prune_expired_launches(self):
+        """Bound memory: keep each launch through its ten-minute tape window."""
+        now = int(time.time())
+        for mint, c in list(self.launches.items()):
+            if c.entry_pending and c.first_buy_timestamp is not None:
+                if now - c.first_buy_timestamp > ENTRY_CONFIRM_SECONDS:
+                    c.entry_pending = False
+                    c.entry_status = "expired_no_following_trade"
+                    self.stats["entries_expired"] += 1
+                    self.j.write("sniper_decisions", {
+                        "mint": mint, "decision": c.entry_status,
+                        "delay_seconds": now - c.first_buy_timestamp,
+                    })
+            if mint != self.open_mint and now - c.created_at > TAIL_SECONDS:
+                self.launches.pop(mint, None)
+
     async def run(self):
         self.j.log("SNIPER V1 PAPER ONLY: launch-first-buy, next-transaction fill; no signed or live transactions.")
         self.j.log(f"config discovery={DISCOVERY_SECONDS}s tail={TAIL_SECONDS}s stake {STAKE_USD:.2f} TP={TAKE_PROFIT:.1%} SL={STOP_LOSS:.1%} max_hold={MAX_HOLD_SECONDS}s")
@@ -241,6 +253,7 @@ class Sniper:
         try:
             while time.time() < deadline and not self.stopped:
                 await asyncio.sleep(1)
+                self.prune_expired_launches()
                 self.j.status({
                     "strategy": "pumpfun_launch_sniper_v1", "mode": "paper",
                     "elapsed_seconds": round(time.time() - self.started, 1),
