@@ -303,6 +303,13 @@ class Sniper:
             p = self.position
             if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
                 self._close_baseline_time_cap(max(0, int(now - p.get("last_price_timestamp", now))), int(now))
+        for mint, pending in list(self.shadow_pending.items()):
+            if now - pending["signal_timestamp"] > ENTRY_CONFIRM_SECONDS:
+                self.shadow_pending.pop(mint, None)
+                self.j.write("sniper_shadow_decisions", {
+                    "mint": mint, "decision": "expired_no_following_trade",
+                    "delay_seconds": int(now - pending["signal_timestamp"]),
+                })
         for mint, p in list(self.shadow_positions.items()):
             if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
                 stale = max(0, int(now - p.get("last_price_timestamp", now)))
@@ -349,7 +356,7 @@ class Sniper:
                 self.launches.pop(mint, None)
 
     async def run(self):
-        self.j.log("SNIPER V1 PAPER ONLY: launch-first-buy, next-transaction fill; no signed or live transactions.")
+        self.j.log("SNIPER V2 PAPER ONLY: baseline first-buy plus independent shadow lane; timer-driven exits; no signed or live transactions.")
         self.j.log(f"config discovery={DISCOVERY_SECONDS}s tail={TAIL_SECONDS}s fixed_paper_stake={STAKE_USD:.2f} TP={TAKE_PROFIT:.1%} SL={STOP_LOSS:.1%} max_hold={MAX_HOLD_SECONDS}s; no loss-based shutdown")
         feed = Feed(self.cfg.feed_ws_urls, self.on_events, self.j.log)
         feed_task = asyncio.create_task(feed.run())
