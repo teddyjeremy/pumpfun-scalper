@@ -306,8 +306,8 @@ def test_high_conviction_lane_requires_signal_confirmation_then_later_execution(
     bot.on_events([create_event()], "create-sig", 1, bot.started)
 
     signal = [
-        ("trade", dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000)),
-        ("trade", dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000)),
+        dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000),
+        dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000),
     ]
     bot.on_events([("trade", x) for x in signal], "v2-signal", 2, bot.started + 1)
     assert bot.v2_lane.position is None
