@@ -126,6 +126,7 @@ jobs:
           python scripts/hourly_report.py --data-dir ./data --out ./report
           python scripts/entry_filter_research.py --data-dir ./data --out ./report
           python scripts/wallet_intelligence.py --data-dir ./data --out ./report --history ./wallet-history/wallet_ledger.json
+          python scripts/wallet_sequential_shadow.py --data-dir ./data --out ./report
 
       - name: Upload wallet intelligence ledger for next run
         if: success() && hashFiles('report/wallet_ledger.json') != ''
