@@ -306,16 +306,16 @@ def test_high_conviction_lane_requires_signal_confirmation_then_later_execution(
     bot.on_events([create_event()], "create-sig", 1, bot.started)
 
     signal = [
-        dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000),
-        dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000),
+        ("trade", dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000)),
     ]
     bot.on_events([("trade", x) for x in signal], "v2-signal", 2, bot.started + 1)
     assert bot.v2_lane.position is None
     assert bot.v2_lane.pending[MINT]["stage"] == "signal"
 
     confirmation = [
-        dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000),
-        dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000),
+        ("trade", dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000)),
     ]
     bot.on_events([("trade", x) for x in confirmation], "v2-confirmation", 3, bot.started + 2)
     assert bot.v2_lane.position is None
@@ -389,8 +389,8 @@ def test_high_conviction_lane_requires_positive_flow_on_execution_transaction(tm
     bot.on_events([trade_event(1001, user=BUYER), trade_event(1001, user=BUYER2)],
                   "v2-signal", 2, bot.started + 1)
     bot.on_events([
-        dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000),
-        dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000),
+        ("trade", dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000)),
     ], "v2-confirmation", 3, bot.started + 2)
     bot.on_events([trade_event(1003, buy=False, user=BUYER)], "v2-execution-sell", 4, bot.started + 3)
     assert bot.v2_lane.position is None
@@ -402,12 +402,12 @@ def test_high_conviction_lane_timer_exit_records_stale_quote_age(tmp_path):
     bot = make_sniper(tmp_path)
     bot.on_events([create_event()], "create-sig", 1, bot.started)
     bot.on_events([
-        dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000),
-        dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000),
+        ("trade", dict(trade_event(1001, user=BUYER)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1001, user=BUYER2)[1], sol_amount=300_000_000)),
     ], "v2-signal", 2, bot.started + 1)
     bot.on_events([
-        dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000),
-        dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000),
+        ("trade", dict(trade_event(1002, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000)),
+        ("trade", dict(trade_event(1002, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000)),
     ], "v2-confirmation", 3, bot.started + 2)
     bot.on_events([trade_event(1003, user=BUYER, price_mult=1.20)], "v2-execution", 4, bot.started + 3)
     bot.v2_lane.timer_tick(1033)
