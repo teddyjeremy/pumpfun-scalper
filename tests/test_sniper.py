@@ -228,3 +228,73 @@ def test_multi_buyer_one_position_portfolio_rejects_single_buyer_signal(tmp_path
     assert bot.cluster_portfolio_position is None
     decisions = bot.j.read_kind("sniper_cluster_portfolio_decisions")
     assert decisions[-1]["decision"] == "rejected_single_buyer_signal_transaction"
+
+
+def test_transaction_summary_uses_final_event_price_and_distinct_wallets(tmp_path):
+    from pumpbot.transaction_intel import build_transaction_summaries
+
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    events = [
+        trade_event(1001, user=BUYER),
+        trade_event(1001, user=BUYER2, price_mult=1.25),
+    ]
+    rows = build_transaction_summaries(events, bot.launches, "multi-buy-sig", 2)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["buyer_count"] == 2
+    assert row["buy_count"] == 2
+    assert row["final_price_sol"] == bot.spot_sol(events[-1][1])
+    assert row["intra_transaction_price_move"] == 0.25
+
+
+def test_transaction_complete_lane_fills_at_final_price_of_followup_transaction(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+
+    signal_events = [trade_event(1001, user=BUYER), trade_event(1001, user=BUYER2, price_mult=1.10)]
+    bot.on_events(signal_events, "signal-transaction", 2, bot.started + 1)
+    assert bot.tx_lane.position is None
+    pending = bot.tx_lane.pending[MINT]
+    assert pending["signal_buyer_count"] == 2
+    assert pending["signal_buy_sol"] == 0.2
+
+    followup_events = [
+        trade_event(1002, user=BUYER, price_mult=1.20),
+        trade_event(1002, user=BUYER2, price_mult=1.30),
+    ]
+    bot.on_events(followup_events, "entry-transaction", 3, bot.started + 2)
+    pos = bot.tx_lane.position
+    assert pos is not None
+    assert pos["entry_signature"] == "entry-transaction"
+    assert pos["entry_price_sol"] == bot.spot_sol(followup_events[-1][1])
+    assert pos["entry_event_count"] == 2
+    assert pos["cohort_id"] == "|".join(sorted([BUYER, BUYER2]))
+
+
+def test_transaction_complete_lane_rejects_creator_sell_signal(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    events = [
+        trade_event(1001, user=BUYER),
+        trade_event(1001, user=BUYER2),
+        trade_event(1001, buy=False, user=CREATOR),
+    ]
+    bot.on_events(events, "creator-dump-signal", 2, bot.started + 1)
+    assert MINT not in bot.tx_lane.pending
+    decisions = bot.j.read_kind("sniper_tx_decisions")
+    assert any(x["decision"] == "rejected_creator_selling_in_signal_transaction" for x in decisions)
+
+
+def test_transaction_complete_lane_timer_exit_records_stale_price_age(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001, user=BUYER), trade_event(1001, user=BUYER2)],
+                  "signal-transaction", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, user=BUYER), trade_event(1002, user=BUYER2, price_mult=1.05)],
+                  "entry-transaction", 3, bot.started + 2)
+    bot.tx_lane.timer_tick(1033)
+    trades = bot.j.read_kind("sniper_tx_trades")
+    assert len(trades) == 1
+    assert trades[0]["exit_reason"] == "time_cap_timer"
+    assert trades[0]["exit_price_stale_seconds"] == 31

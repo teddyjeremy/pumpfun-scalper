@@ -41,6 +41,10 @@ def main():
     cluster_portfolio_entries = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_entries_sniper.jsonl"))
     cluster_portfolio_trades = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_trades_sniper.jsonl"))
     cluster_portfolio_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_decisions_sniper.jsonl"))
+    tx_summaries = read_jsonl(os.path.join(args.data_dir, "sniper_transactions_sniper.jsonl"))
+    tx_entries = read_jsonl(os.path.join(args.data_dir, "sniper_tx_entries_sniper.jsonl"))
+    tx_trades = read_jsonl(os.path.join(args.data_dir, "sniper_tx_trades_sniper.jsonl"))
+    tx_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_tx_decisions_sniper.jsonl"))
     wins = [x for x in trades if float(x.get("net_pnl_usd", 0)) > 0]
     losses = [x for x in trades if float(x.get("net_pnl_usd", 0)) <= 0]
     net = sum(float(x.get("net_pnl_usd", 0)) for x in trades)
@@ -87,6 +91,28 @@ def main():
     cluster_portfolio_wins = [x for x in cluster_portfolio_trades if float(x.get("net_pnl_usd", 0)) > 0]
     cluster_portfolio_losses = [x for x in cluster_portfolio_trades if float(x.get("net_pnl_usd", 0)) <= 0]
     cluster_portfolio_decision_counts = Counter(x.get("decision", "unknown") for x in cluster_portfolio_decisions)
+    tx_wins = [x for x in tx_trades if float(x.get("net_pnl_usd", 0)) > 0]
+    tx_losses = [x for x in tx_trades if float(x.get("net_pnl_usd", 0)) <= 0]
+    tx_decision_counts = Counter(x.get("decision", "unknown") for x in tx_decisions)
+    tx_cohorts, tx_wallets = {}, {}
+    for row in tx_trades:
+        pnl = float(row.get("net_pnl_usd", 0))
+        cohort = row.get("cohort_id") or "unknown"
+        item = tx_cohorts.setdefault(cohort, {"trades": 0, "wins": 0, "losses": 0, "net_pnl_usd": 0.0, "buyer_wallets": row.get("signal_buyer_wallets", [])})
+        item["trades"] += 1
+        item["wins"] += int(pnl > 0)
+        item["losses"] += int(pnl <= 0)
+        item["net_pnl_usd"] += pnl
+        for wallet in row.get("signal_buyer_wallets", []):
+            w = tx_wallets.setdefault(wallet, {"trades": 0, "wins": 0, "losses": 0, "net_pnl_usd": 0.0})
+            w["trades"] += 1
+            w["wins"] += int(pnl > 0)
+            w["losses"] += int(pnl <= 0)
+            w["net_pnl_usd"] += pnl
+    tx_cohort_ranked = sorted(({"cohort_id": k, **v, "net_pnl_usd": round(v["net_pnl_usd"], 6)} for k, v in tx_cohorts.items()), key=lambda x: (x["net_pnl_usd"], x["trades"]), reverse=True)
+    tx_wallet_ranked = sorted(({"wallet": k, **v, "net_pnl_usd": round(v["net_pnl_usd"], 6)} for k, v in tx_wallets.items()), key=lambda x: (x["net_pnl_usd"], x["trades"]), reverse=True)
+    tx_intramoves = [float(x["intra_transaction_price_move"]) for x in tx_summaries if x.get("intra_transaction_price_move") is not None]
+    tx_multi_buyer = [x for x in tx_summaries if int(x.get("buyer_count", 0)) >= 2]
     summary = {
         "launches_detected": len(launches),
         "sol_quoted_launches": sum(1 for x in launches if x.get("quote_mint") == "SOL"),
@@ -116,6 +142,20 @@ def main():
         "multi_buyer_one_position_net_pnl_usd": round(sum(float(x.get("net_pnl_usd", 0)) for x in cluster_portfolio_trades), 6),
         "multi_buyer_one_position_unclosed_entries": max(0, len(cluster_portfolio_entries) - len(cluster_portfolio_trades)),
         "multi_buyer_one_position_decisions": dict(cluster_portfolio_decision_counts),
+        "transaction_summary_count": len(tx_summaries),
+        "transaction_multi_buyer_count": len(tx_multi_buyer),
+        "transaction_unique_mints": len({x.get("mint") for x in tx_summaries}),
+        "transaction_mean_intra_transaction_price_move": mean(tx_intramoves) if tx_intramoves else None,
+        "transaction_lane_entries": len(tx_entries),
+        "transaction_lane_closed_trades": len(tx_trades),
+        "transaction_lane_wins": len(tx_wins),
+        "transaction_lane_losses": len(tx_losses),
+        "transaction_lane_win_rate": len(tx_wins) / len(tx_trades) if tx_trades else None,
+        "transaction_lane_net_pnl_usd": round(sum(float(x.get("net_pnl_usd", 0)) for x in tx_trades), 6),
+        "transaction_lane_unclosed_entries": max(0, len(tx_entries) - len(tx_trades)),
+        "transaction_lane_decisions": dict(tx_decision_counts),
+        "transaction_lane_top_cohorts": tx_cohort_ranked[:20],
+        "transaction_lane_top_wallets": tx_wallet_ranked[:20],
         "portfolio_capacity_comparison": capacity_results,
         "first_buy_wallet_performance": wallet_ranked,
         "closed_trades": len(trades),
@@ -138,6 +178,8 @@ def main():
             "Both multi-buyer lanes are counterfactual paper research and do not change baseline entries or the broad independent shadow lane.",
             "Price is derived from virtual bonding-curve reserves; P&L includes configured fee, slippage and fixed gas assumptions.",
             "A single one-hour observation is exploratory, not evidence of profitability.",
+            "Transaction-complete research aggregates all decoded events for a signature and uses the final observed reserve-derived price per mint; this remains a paper approximation, not an executable quote.",
+            "Wallet-cohort results are descriptive within-session observations and do not establish wallet identity, coordination, or future performance.",
         ],
     }
     with open(os.path.join(args.out, "sniper_report.json"), "w", encoding="utf-8") as f:
@@ -157,6 +199,21 @@ def main():
         f"- Net simulated P&L: **${summary['net_pnl_usd']:.4f}**",
         f"- Average signal-to-fill delay: **{summary['average_entry_delay_seconds']:.2f}s**" if summary["average_entry_delay_seconds"] is not None else "- Average signal-to-fill delay: n/a",
         f"- Unclosed entries at shutdown: **{summary['unclosed_entries']}**",
+        "", "## Transaction-complete research",
+        f"- Per-mint transaction summaries: **{summary['transaction_summary_count']}**",
+        f"- Multi-buyer transactions: **{summary['transaction_multi_buyer_count']}**",
+        f"- Unique mints represented: **{summary['transaction_unique_mints']}**",
+        f"- Mean within-transaction price movement: **{summary['transaction_mean_intra_transaction_price_move']:.2%}**" if summary["transaction_mean_intra_transaction_price_move"] is not None else "- Mean within-transaction price movement: n/a",
+        f"- Entries / closed trades: **{summary['transaction_lane_entries']} / {summary['transaction_lane_closed_trades']}**",
+        f"- Wins / losses: **{summary['transaction_lane_wins']} / {summary['transaction_lane_losses']}**",
+        f"- Win rate: **{summary['transaction_lane_win_rate']:.1%}**" if summary["transaction_lane_win_rate"] is not None else "- Win rate: n/a",
+        f"- Net simulated P&L: **{summary['transaction_lane_net_pnl_usd']:.4f} USD**",
+        f"- Unclosed entries: **{summary['transaction_lane_unclosed_entries']}**",
+        f"- Decisions: **{summary['transaction_lane_decisions']}**",
+        "", "### Top transaction-level buyer cohorts",
+        *[f"- {x['buyer_wallets']}: {x['trades']} trades, {x['wins']} wins, {x['losses']} losses, net {x['net_pnl_usd']:.4f} USD" for x in tx_cohort_ranked[:10]],
+        "", "### Top wallets participating in transaction-level entries",
+        *[f"- {x['wallet']}: {x['trades']} trades, {x['wins']} wins, {x['losses']} losses, net {x['net_pnl_usd']:.4f} USD" for x in tx_wallet_ranked[:10]],
         "", "## Independent shadow research",
         f"- Shadow entries: **{summary['independent_shadow_entries']}**",
         f"- Shadow closed trades: **{summary['independent_shadow_closed_trades']}**",

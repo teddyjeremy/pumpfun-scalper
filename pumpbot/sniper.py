@@ -10,6 +10,7 @@ from .config import Config
 from .events import SOL
 from .feed import Feed
 from .journal import Journal
+from .transaction_intel import TransactionAwareLane, build_transaction_summaries
 
 DISCOVERY_SECONDS = int(os.environ.get("SNIPER_DISCOVERY_SECONDS", "3600"))
 TAIL_SECONDS = int(os.environ.get("SNIPER_TAIL_SECONDS", "600"))
@@ -67,6 +68,13 @@ class Sniper:
         # One-position portfolio lane: same multi-buyer rule, but a shared single slot.
         self.cluster_portfolio_pending: dict[str, dict] = {}
         self.cluster_portfolio_position: dict | None = None
+        # Isolated lane: all signals, fills and marks use transaction-complete snapshots.
+        self.tx_lane = TransactionAwareLane(
+            self.j, stake_usd=STAKE_USD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS,
+            max_hold_seconds=MAX_HOLD_SECONDS, confirm_seconds=ENTRY_CONFIRM_SECONDS,
+            entry_slippage=ENTRY_SLIPPAGE, exit_slippage=EXIT_SLIPPAGE,
+            fee_rate=FEE_RATE, gas_usd=ROUND_TRIP_GAS_USD,
+        )
         self.stats = {
             "creates": 0, "sol_launches": 0, "trades_recorded": 0,
             "first_buy_signals": 0, "entries_filled": 0, "entries_rejected_busy": 0,
@@ -137,6 +145,12 @@ class Sniper:
                         "t_plus": int(ev.get("timestamp") or c.created_at) - c.created_at,
                         "signature": signature, "slot": slot or 0,
                     })
+
+        # Feed callbacks contain all decoded events for one Solana signature.
+        # Aggregate after legacy lanes, then run the isolated transaction-complete lane.
+        for tx_summary in build_transaction_summaries(events, self.launches, signature, slot):
+            self.j.write("sniper_transactions", tx_summary)
+            self.tx_lane.process(tx_summary)
 
     def _trade_launch(self, c: Launch, ev: dict, signature: str, price: float, t: int):
         side_buy = bool(ev.get("is_buy"))
@@ -507,6 +521,7 @@ class Sniper:
     def timer_tick(self, now: float | None = None):
         """Apply max-hold exits even if a token receives no further transactions."""
         now = time.time() if now is None else now
+        self.tx_lane.timer_tick(now)
         if self.position:
             p = self.position
             if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
@@ -616,6 +631,8 @@ class Sniper:
                 "shadow_positions_at_shutdown": list(self.shadow_positions.values()),
                 "cluster_positions_at_shutdown": list(self.cluster_positions.values()),
                 "cluster_portfolio_position_at_shutdown": self.cluster_portfolio_position,
+                "transaction_lane_position_at_shutdown": self.tx_lane.position,
+                "transaction_lane_pending_count_at_shutdown": len(self.tx_lane.pending),
             })
             self.j.log("SNIPER shutdown; all observed launch trades have been written to the research tape.")
 
