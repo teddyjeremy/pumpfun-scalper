@@ -117,43 +117,37 @@ def replay_variant(variant, cfg, coin_rows, tape_rows, raw_rows, scores):
     portfolio = Portfolio(variant)
     engines, last_bt = {}, {}
     events = []
+    events = []
+    engines, row_counts = {}, {}
     for mint, rows in by_mint.items():
         rows.sort(key=lambda x: (int(x.get("bt") or 0), int(x.get("slot") or 0)))
         info = meta[mint]
         t0 = int(info.get("created_at") or 0)
+        # Start with an empty streaming tape. CoinEngine.on_trade appends each
+        # recorded trade in global timestamp order; preloading would leak future data.
         tp = Tape(mint, t0, info.get("creator"), info.get("quote_mint") or "SOL")
-        for r in rows:
+        engines[mint] = CoinEngine(tp, cfg, gate=portfolio.gate_for(mint, scores))
+        row_counts[mint] = len(rows)
+        for index, r in enumerate(rows):
             bt = int(r.get("bt") or 0)
             raw_key = (mint, bt, r.get("trader"), r.get("side"), int(r.get("slot") or 0))
-            raw = raw_lookup.get(raw_key, {})
-            tok_raw = raw.get("token_amount_raw")
+            raw_event = raw_lookup.get(raw_key, {})
+            tok_raw = raw_event.get("token_amount_raw")
             tok = float(tok_raw) / 1e6 if tok_raw is not None else 0.0
-            tp.append({
+            trade = {
                 "bt": bt, "t": int(r.get("t_plus") or 0),
                 "side": r.get("side"), "spot": float(r["price_usd"]),
                 "usd": float(r.get("trade_usd") or 0), "trader": r.get("trader"),
                 "tok": tok, "sol": 0.0, "slot": int(r.get("slot") or 0),
-            })
-        if not tp.n:
-            continue
-        # Preserve exact recorded ordering for global portfolio sequencing.
-        engines[mint] = CoinEngine(tp, cfg, gate=portfolio.gate_for(mint, scores))
-        for i in range(tp.n):
-            events.append((tp.bt[i], int(tp.slot[i]), mint, i))
-        last_bt[mint] = tp.bt[-1]
+            }
+            events.append((bt, int(r.get("slot") or 0), mint, index, trade))
 
     events.sort(key=lambda x: (x[0], x[1], x[2]))
     finished = set()
-    for _, _, mint, i in events:
+    for _, _, mint, index, trade in events:
         engine = engines[mint]
-        portfolio.consume(mint, engine.on_trade({
-            "bt": engine.tape.bt[i], "t": engine.tape.t[i],
-            "side": "buy" if engine.tape.buy[i] else "sell",
-            "spot": engine.tape.spot[i], "usd": engine.tape.usd[i],
-            "trader": engine.tape.trader[i], "tok": engine.tape.tok[i],
-            "sol": 0.0, "slot": engine.tape.slot[i],
-        }))
-        if i == engine.tape.n - 1 and mint not in finished:
+        portfolio.consume(mint, engine.on_trade(trade))
+        if index == row_counts[mint] - 1 and mint not in finished:
             portfolio.consume(mint, engine.finish())
             portfolio.finish_mint(mint)
             finished.add(mint)
