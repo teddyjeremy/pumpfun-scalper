@@ -78,3 +78,20 @@ def test_non_sol_launch_is_recorded_but_not_traded(tmp_path):
     assert bot.stats["first_buy_signals"] == 0
     launches = bot.j.read_kind("sniper_launches")
     assert launches[0]["decision"] == "observe_only_non_sol_quote"
+
+
+
+def test_paper_stake_remains_fixed_when_accounting_wallet_is_below_five_dollars(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.wallet = 4.50  # Research accounting balance only; no real funds are at risk.
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot._enter(
+        bot.launches[MINT],
+        trade_event(1002)[1],
+        "entry-fill-sig",
+        bot.spot_sol(trade_event(1002)[1]),
+        2,
+        1,
+    )
+    assert bot.position["stake_usd"] == 1.00
+    assert bot.wallet == 4.50
