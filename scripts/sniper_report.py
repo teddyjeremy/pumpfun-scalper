@@ -38,6 +38,9 @@ def main():
     cluster_entries = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_entries_sniper.jsonl"))
     cluster_trades = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_trades_sniper.jsonl"))
     cluster_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_decisions_sniper.jsonl"))
+    cluster_portfolio_entries = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_entries_sniper.jsonl"))
+    cluster_portfolio_trades = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_trades_sniper.jsonl"))
+    cluster_portfolio_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_decisions_sniper.jsonl"))
     wins = [x for x in trades if float(x.get("net_pnl_usd", 0)) > 0]
     losses = [x for x in trades if float(x.get("net_pnl_usd", 0)) <= 0]
     net = sum(float(x.get("net_pnl_usd", 0)) for x in trades)
@@ -81,6 +84,9 @@ def main():
     cluster_losses = [x for x in cluster_trades if float(x.get("net_pnl_usd", 0)) <= 0]
     cluster_buyer_counts = Counter(int(x.get("signal_transaction_buyer_count", 0)) for x in cluster_entries)
     cluster_decision_counts = Counter(x.get("decision", "unknown") for x in cluster_decisions)
+    cluster_portfolio_wins = [x for x in cluster_portfolio_trades if float(x.get("net_pnl_usd", 0)) > 0]
+    cluster_portfolio_losses = [x for x in cluster_portfolio_trades if float(x.get("net_pnl_usd", 0)) <= 0]
+    cluster_portfolio_decision_counts = Counter(x.get("decision", "unknown") for x in cluster_portfolio_decisions)
     summary = {
         "launches_detected": len(launches),
         "sol_quoted_launches": sum(1 for x in launches if x.get("quote_mint") == "SOL"),
@@ -102,6 +108,14 @@ def main():
         "multi_buyer_cluster_signal_buyer_counts": dict(cluster_buyer_counts),
         "multi_buyer_cluster_decisions": dict(cluster_decision_counts),
         "multi_buyer_cluster_unclosed_entries": max(0, len(cluster_entries) - len(cluster_trades)),
+        "multi_buyer_one_position_entries": len(cluster_portfolio_entries),
+        "multi_buyer_one_position_closed_trades": len(cluster_portfolio_trades),
+        "multi_buyer_one_position_wins": len(cluster_portfolio_wins),
+        "multi_buyer_one_position_losses": len(cluster_portfolio_losses),
+        "multi_buyer_one_position_win_rate": (len(cluster_portfolio_wins) / len(cluster_portfolio_trades)) if cluster_portfolio_trades else None,
+        "multi_buyer_one_position_net_pnl_usd": round(sum(float(x.get("net_pnl_usd", 0)) for x in cluster_portfolio_trades), 6),
+        "multi_buyer_one_position_unclosed_entries": max(0, len(cluster_portfolio_entries) - len(cluster_portfolio_trades)),
+        "multi_buyer_one_position_decisions": dict(cluster_portfolio_decision_counts),
         "portfolio_capacity_comparison": capacity_results,
         "first_buy_wallet_performance": wallet_ranked,
         "closed_trades": len(trades),
@@ -120,7 +134,8 @@ def main():
             "Launch capture is limited to Pump.fun create events decoded by the configured websocket feed.",
             "Only SOL-quoted launches are eligible for this baseline; other quote types are recorded as observe-only.",
             "The multi-buyer research lane requires at least two distinct non-creator buyers in the signal transaction; this is a transaction-pattern heuristic, not proof of a coordinated bundle.",
-            "The multi-buyer lane is counterfactual and does not change baseline entries or the broad independent shadow lane.",
+            "The independent multi-buyer lane permits concurrent per-mint positions; the separate one-position multi-buyer portfolio lane enforces one shared slot.",
+            "Both multi-buyer lanes are counterfactual paper research and do not change baseline entries or the broad independent shadow lane.",
             "Price is derived from virtual bonding-curve reserves; P&L includes configured fee, slippage and fixed gas assumptions.",
             "A single one-hour observation is exploratory, not evidence of profitability.",
         ],
@@ -155,6 +170,13 @@ def main():
         f"- Net simulated P&L: **${summary['multi_buyer_cluster_net_pnl_usd']:.4f}**",
         f"- Signal-transaction buyer counts: **{summary['multi_buyer_cluster_signal_buyer_counts']}**",
         f"- Decisions: **{summary['multi_buyer_cluster_decisions']}**",
+        "", "### Multi-buyer one-position portfolio",
+        f"- Entries: **{summary['multi_buyer_one_position_entries']}**",
+        f"- Closed trades: **{summary['multi_buyer_one_position_closed_trades']}**",
+        f"- Wins / losses: **{summary['multi_buyer_one_position_wins']} / {summary['multi_buyer_one_position_losses']}**",
+        f"- Win rate: **{summary['multi_buyer_one_position_win_rate']:.1%}**" if summary["multi_buyer_one_position_win_rate"] is not None else "- Win rate: n/a",
+        f"- Net simulated P&L: **${summary['multi_buyer_one_position_net_pnl_usd']:.4f}**",
+        f"- Decisions: **{summary['multi_buyer_one_position_decisions']}**",
         "", "### Portfolio capacity comparison",
     ]
     lines.extend(f"- {cap} concurrent: {v['trades']} trades, {v['wins']} wins, {v['losses']} losses, net ${v['net_pnl_usd']:.4f}" for cap, v in capacity_results.items())
@@ -167,6 +189,8 @@ def main():
     lines.extend(f"- {k}: {v}" for k, v in sorted(decision_counts.items()))
     lines += ["", "## Multi-buyer lane decisions"]
     lines.extend(f"- {k}: {v}" for k, v in sorted(cluster_decision_counts.items()))
+    lines += ["", "## Multi-buyer one-position portfolio decisions"]
+    lines.extend(f"- {k}: {v}" for k, v in sorted(cluster_portfolio_decision_counts.items()))
     lines += ["", "## Limitations"] + [f"- {x}" for x in summary["limitations"]]
     with open(os.path.join(args.out, "sniper_report.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
