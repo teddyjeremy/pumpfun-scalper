@@ -261,7 +261,6 @@ class Sniper:
 
 def main():
     cfg = Config.from_env()
-    cfg.mode = "paper"
     asyncio.run(Sniper(cfg).run())
 
 
