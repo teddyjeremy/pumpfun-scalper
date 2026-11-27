@@ -16,10 +16,18 @@ def test_buy_quote_uses_documented_fee_rounding_and_minus_one_lamport():
     creator_fee = (net * 30 + 9_999) // 10_000
     if net + protocol_fee + creator_fee > spend:
         net -= net + protocol_fee + creator_fee - spend
+    protocol_fee = (net * 95 + 9_999) // 10_000
+    creator_fee = (net * 30 + 9_999) // 10_000
     expected = (net - 1) * vt // (vq + net - 1)
     assert result["net_quote_in"] == net
     assert result["tokens_out"] == expected
     assert result["total_fees"] == protocol_fee + creator_fee
+
+
+def test_buy_quote_recomputes_ceil_fees_after_budget_correction():
+    result = quote_buy_exact_quote_in(108, 30_000_000_000, 1_000_000_000_000_000, 95, 30)
+    assert result["net_quote_in"] == 105
+    assert result["total_fees"] == 2
 
 
 def test_sell_quote_deducts_protocol_and_creator_fees_separately():
