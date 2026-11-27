@@ -142,11 +142,15 @@ def summarize(r):
 def build_report(data_dir, out_dir):
     rows=read_jsonl(os.path.join(data_dir,"sniper_transactions_sniper.jsonl"))
     rows.sort(key=lambda x:int(x.get("observation_sequence") or 0))
-    results=[]
+    runs=[]
     for ms in DELAYS_MS:
         for name,limit,cooldown in POLICIES:
-            results.append(summarize(replay(rows,ms/1000,name,limit,cooldown)))
+            runs.append(replay(rows,ms/1000,name,limit,cooldown))
+    results=[summarize(x) for x in runs]
     os.makedirs(out_dir,exist_ok=True)
+    with open(os.path.join(out_dir,"wallet_policy_replay_details.json"),"w",encoding="utf-8") as f:
+        json.dump({"lanes":[{"delay":x["delay"],"policy":x["policy"],"entries":x["entries"],
+            "trades":x["trades"],"open_position":x["open"],"decisions":x["decisions"]} for x in runs]},f)
     with open(os.path.join(out_dir,"wallet_policy_replay.json"),"w",encoding="utf-8") as f:
         json.dump({"input_transactions":len(rows),"lanes":results},f,indent=2)
     lines=["# Wallet-loss policy ablation (paper research only)","",
@@ -157,7 +161,7 @@ def build_report(data_dir, out_dir):
     for x in results:
         wr=f'{x["win_rate"]:.1%}' if x["win_rate"] is not None else "n/a"
         pf=f'{x["profit_factor"]:.2f}' if x["profit_factor"] is not None else "n/a"
-        lines.append(f'| {x["delay"]:.1f}s | {x["policy"]} | {x["entries"]} | {x["closed"]} | {x["wins"]}/{x["losses"]} | {wr} | \${x["net_pnl_usd"]:.4f} | {pf} | {x["max_loss_streak"]} | {x["unique_mints"]} | {"yes" if x["open"] else "no"} |')
+        lines.append(f'| {x["delay"]:.1f}s | {x["policy"]} | {x["entries"]} | {x["closed"]} | {x["wins"]}/{x["losses"]} | {wr} | ${x["net_pnl_usd"]:.4f} | {pf} | {x["max_loss_streak"]} | {x["unique_mints"]} | {"yes" if x["open"] else "no"} |')
     lines += ["","## Limitations",
       "- Offline paired replay only. Existing runtime lanes, K/B decisions, and live execution paths are unchanged.",
       "- Prices remain reserve-derived transaction marks with configured slippage, fees, and gas, not executable sell quotes or confirmed fills.",
