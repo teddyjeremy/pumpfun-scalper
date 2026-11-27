@@ -183,8 +183,8 @@ def _replay_one(trade: dict, mint_tape: list[dict], signature_indices: dict[str,
     entry_slot, exit_slot = int(entry_event.get("slot") or 0), int(exit_event.get("slot") or 0)
     if exit_slot <= entry_slot:
         return {"status": "not_later_slot"}
-    if launch and (launch.get("is_mayhem_mode") or launch.get("is_cashback_enabled")):
-        return {"status": "unsupported_launch_mode"}
+    if launch and launch.get("is_cashback_enabled"):
+        return {"status": "unsupported_cashback_launch"}
 
     interval = mint_tape[entry_index + 1:exit_index + 1]
     if entry_event.get("mayhem_mode") or exit_event.get("mayhem_mode") or any(
@@ -381,6 +381,7 @@ def build_report(data_dir: str, out_dir: str, *, sol_usd: float,
             "SOL/USD is a reference-price assumption used to convert the USD stake into lamports; it was not captured per transaction in the original tape.",
             "The original tape omitted real reserves, Mayhem/cashback flags, and raw fee amounts. Formula mismatches are rejected, but the historical tape cannot prove every unsupported curve feature was absent.",
             "PumpSwap trading after curve completion is not replayed; such positions are unsupported rather than silently valued.",
+            "Mayhem V3 trades are supported when the captured window remains on-curve and does not complete; cashback coins remain excluded.",
             "The three latency lanes overlap and are counterfactual variants; never add their P&Ls.",
             "One-time user-volume-accumulator rent and token-account rent timing are not allocated to individual trades.",
         ],
