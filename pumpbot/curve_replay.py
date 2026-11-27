@@ -191,6 +191,9 @@ def _replay_one(trade: dict, mint_tape: list[dict], signature_indices: dict[str,
         event.get("mayhem_mode") for event in interval
     ):
         return {"status": "unsupported_mayhem_mode"}
+    if any(int(event.get("cashback_bps") or 0) > 0 or int(event.get("cashback") or 0) > 0
+           for event in [entry_event, *interval, exit_event]):
+        return {"status": "unsupported_cashback_mode"}
     if any(entry_slot <= slot <= exit_slot for slot in complete_slots):
         return {"status": "curve_completed_before_exit"}
 
