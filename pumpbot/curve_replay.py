@@ -39,6 +39,10 @@ def quote_buy_exact_quote_in(spendable_quote_in: int, virtual_quote_reserves: in
     fees = protocol_fee + creator_fee
     if net_quote_in + fees > spendable_quote_in:
         net_quote_in -= net_quote_in + fees - spendable_quote_in
+        # The program charges fees on the adjusted net curve input.
+        protocol_fee = ceil_div(net_quote_in * protocol_fee_bps, 10_000)
+        creator_fee = ceil_div(net_quote_in * creator_fee_bps, 10_000)
+        fees = protocol_fee + creator_fee
     if net_quote_in <= 1:
         raise ValueError("spend is too small after fees")
     quote_for_curve = net_quote_in - 1
