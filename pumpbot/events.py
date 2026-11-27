@@ -66,11 +66,17 @@ def decode_trade(raw: bytes) -> dict | None:
         return None
     ev["quote_mint"] = SOL if ev["virtual_sol_reserves"] > 0 else None
     try:  # extended tail (present on current program versions)
-        r.bool(); r.u64(); r.u64(); r.u64(); r.i64()           # track_volume, unclaimed, claimed, cur vol, last ts
+        ev["track_volume"] = r.bool()
+        ev["unclaimed_creator_fee"] = r.u64()
+        ev["claimed_creator_fee"] = r.u64()
+        ev["current_sol_volume"] = r.u64()
+        ev["last_trade_timestamp"] = r.i64()
         ev["ix_name"] = r.string()
         ev["mayhem_mode"] = r.bool()
-        r.u64(); r.u64()                                       # cashback bps, cashback
-        r.u64(); r.u64()                                       # buyback bps, buyback fee
+        ev["cashback_bps"] = r.u64()
+        ev["cashback"] = r.u64()
+        ev["buyback_bps"] = r.u64()
+        ev["buyback_fee"] = r.u64()
         n = r.u32()
         if n > 64:
             raise ValueError("bad vec")
