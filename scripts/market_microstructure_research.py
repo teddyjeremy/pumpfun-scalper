@@ -21,6 +21,8 @@ FEATURES = (
     "external_buy_reserve_fraction_5s",
     "net_flow_reserve_fraction_5s",
     "distinct_buyers_5s",
+    "top1_buyer_share_5s",
+    "buyer_hhi_5s",
     "reserve_sol_5s",
     "price_return_1s",
     "price_return_3s",
