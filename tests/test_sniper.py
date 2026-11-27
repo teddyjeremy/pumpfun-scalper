@@ -69,6 +69,36 @@ def test_position_exits_on_take_profit_and_accounts_for_costs(tmp_path):
     assert rows[0]["round_trip_gas_usd"] == 0.0285
 
 
+def test_sniper_tape_persists_curve_execution_metadata(tmp_path):
+    bot = make_sniper(tmp_path)
+    create = dict(create_event()[1], is_mayhem_mode=True, is_cashback_enabled=False)
+    bot.on_events([("create", create)], "create-sig", 1, bot.started)
+    trade = dict(
+        trade_event(1001)[1],
+        real_sol_reserves=30_000_000_000,
+        real_token_reserves=700_000_000_000_000,
+        fee=950_000,
+        creator_fee_bps=30,
+        creator_fee=300_000,
+        buyback_bps=0,
+        buyback_fee=0,
+        cashback_bps=0,
+        cashback=0,
+        mayhem_mode=True,
+        ix_name="buy_exact_quote_in_v3",
+    )
+    bot.on_events([("trade", trade)], "trade-sig", 2, bot.started + 1)
+    launch = bot.j.read_kind("sniper_launches")[0]
+    tape = bot.j.read_kind("sniper_tape")[0]
+    assert launch["is_mayhem_mode"] is True
+    assert launch["is_cashback_enabled"] is False
+    assert tape["real_sol_reserves_raw"] == 30_000_000_000
+    assert tape["real_token_reserves_raw"] == 700_000_000_000_000
+    assert tape["fee_raw"] == 950_000 and tape["creator_fee_raw"] == 300_000
+    assert tape["buyback_bps"] == 0 and tape["buyback_fee_raw"] == 0
+    assert tape["mayhem_mode"] is True and tape["ix_name"] == "buy_exact_quote_in_v3"
+
+
 def test_non_sol_launch_is_recorded_but_not_traded(tmp_path):
     bot = make_sniper(tmp_path)
     ev = dict(create_event()[1], quote_mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGkGZwyTDt1v")
