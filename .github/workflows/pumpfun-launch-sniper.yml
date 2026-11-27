@@ -117,6 +117,12 @@ jobs:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
         run: python scripts/sniper_slot_order_reconstruction.py --data-dir ./data --out ./report
 
+      - name: Reconstruct canonical transaction order for replay
+        if: always()
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+        run: python scripts/sniper_slot_order_reconstruction.py --data-dir ./data --out ./report
+
       - name: Upload sniper observation
         if: always()
         uses: actions/upload-artifact@v4
