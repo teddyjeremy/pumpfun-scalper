@@ -42,7 +42,7 @@ def test_snapshot_uses_later_slot_and_forward_mark_after_delay():
     assert row["distinct_buyers_5s"] == 3
     assert row["external_buy_sol_5s"] == 0.10
     assert round(row["top1_buyer_share_5s"], 4) == 0.4
-    assert round(row["buyer_hhi_5s"], 4) == 0.41
+    assert round(row["buyer_hhi_5s"], 4) == 0.34
     assert round(row["delay_0.5s_entry_lag_seconds"], 4) == 1.0
     assert round(row["delay_0.5s_return_5s"], 4) == round(1.15 / 1.04 - 1, 4)
 
