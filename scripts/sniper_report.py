@@ -357,6 +357,14 @@ def main():
         f"- Win rate: **{summary['multi_buyer_one_position_win_rate']:.1%}**" if summary["multi_buyer_one_position_win_rate"] is not None else "- Win rate: n/a",
         f"- Net simulated P&L: **${summary['multi_buyer_one_position_net_pnl_usd']:.4f}**",
         f"- Decisions: **{summary['multi_buyer_one_position_decisions']}**",
+        "", "### Multi-buyer wallet-loss guard shadow lane",
+        "- Rules: same one-position multi-buyer entry and exit logic; after a losing trade, block subsequent signals from that trade's first-buyer signal wallet for the rest of this session. Other wallets remain eligible.",
+        f"- Entries / closed trades: **{summary['multi_buyer_wallet_guard_entries']} / {summary['multi_buyer_wallet_guard_closed_trades']}**",
+        f"- Wins / losses: **{summary['multi_buyer_wallet_guard_wins']} / {summary['multi_buyer_wallet_guard_losses']}**",
+        f"- Win rate: **{summary['multi_buyer_wallet_guard_win_rate']:.1%}**" if summary['multi_buyer_wallet_guard_win_rate'] is not None else "- Win rate: n/a",
+        f"- Net simulated P&L: **${summary['multi_buyer_wallet_guard_net_pnl_usd']:.4f}**",
+        f"- Signal wallets locked after a loss: **{summary['multi_buyer_wallet_guard_locked_wallets']}**",
+        f"- Decisions: **{summary['multi_buyer_wallet_guard_decisions']}**",
         "", "### Portfolio capacity comparison",
     ]
     lines.extend(f"- {cap} concurrent: {v['trades']} trades, {v['wins']} wins, {v['losses']} losses, net ${v['net_pnl_usd']:.4f}" for cap, v in capacity_results.items())
