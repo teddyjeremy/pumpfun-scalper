@@ -103,6 +103,10 @@ jobs:
         if: always()
         run: python scripts/wallet_policy_replay.py --data-dir ./data --out ./report
 
+      - name: Build market microstructure and execution-integrity report
+        if: always()
+        run: python scripts/market_microstructure_research.py --data-dir ./data --out ./report
+
       - name: Upload sniper observation
         if: always()
         uses: actions/upload-artifact@v4
