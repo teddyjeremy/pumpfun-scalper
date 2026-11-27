@@ -118,3 +118,53 @@ def test_mayhem_v3_curve_is_supported_for_non_completing_window():
         launch={"is_mayhem_mode": True, "is_cashback_enabled": False},
     )
     assert result["status"] == "ok"
+
+
+
+def test_next_later_slot_policy_waits_through_same_slot_events_for_entry_and_exit():
+    from pumpbot.curve_replay import _replay_one
+
+    mint = "SlotFillMint"
+    vq, vt = 30_000_000_000, 1_000_000_000_000_000
+    real = 700_000_000_000_000
+
+    def buy(signature, slot, quote):
+        nonlocal vq, vt, real
+        tokens = (quote - 1) * vt // (vq + quote - 1)
+        vq += quote
+        vt -= tokens
+        real -= tokens
+        return {
+            "mint": mint, "signature": signature, "slot": slot, "side": "buy",
+            "sol_amount_raw": quote, "token_amount_raw": tokens,
+            "virtual_sol_reserves_raw": vq, "virtual_token_reserves_raw": vt,
+            "real_token_reserves_raw": real, "fee_bps": 95,
+            "creator_fee_bps": 30, "cashback_bps": 0, "cashback": 0,
+        }
+
+    tape = [
+        buy("entry-decision", 10, 20_000_000),
+        buy("same-slot-entry", 10, 10_000_000),
+        buy("entry-fill", 11, 10_000_000),
+        buy("exit-trigger", 12, 10_000_000),
+        buy("same-slot-exit", 12, 10_000_000),
+        buy("exit-fill", 13, 10_000_000),
+    ]
+    result = _replay_one(
+        {"mint": mint, "entry_signature": "entry-decision",
+         "exit_signature": "exit-trigger", "net_pnl_usd": -0.1,
+         "market_move_at_exit": 0.02},
+        tape,
+        {"entry-decision": 0, "exit-trigger": 3},
+        set(),
+        sol_usd=73.35, stake_usd=1.0, gas_usd=0.0285,
+        max_formula_error=1e-4,
+        fill_policy="next_later_slot",
+    )
+    assert result["status"] == "ok"
+    assert result["entry_fill_signature"] == "entry-fill"
+    assert result["exit_fill_signature"] == "exit-fill"
+    assert result["entry_decision_slot"] == 10
+    assert result["entry_slot"] == 11
+    assert result["exit_trigger_slot"] == 12
+    assert result["exit_slot"] == 13
