@@ -68,6 +68,16 @@ def _trade_event(quote_mint=None, vsol=40 * 10 ** 9, qamt=0, vq=0):
     return bytes(b)
 
 
+def test_decode_trade_preserves_curve_fee_and_mode_metadata():
+    ev = decode_trade(_trade_event())
+    assert ev["real_sol_reserves"] == 1
+    assert ev["real_token_reserves"] == 1
+    assert ev["fee"] == 1 and ev["creator_fee"] == 1
+    assert ev["mayhem_mode"] is True
+    assert ev["cashback_bps"] == 30 and ev["cashback"] == 3
+    assert ev["buyback_bps"] == 20 and ev["buyback_fee"] == 2
+
+
 def test_decode_sol_trade():
     ev = decode_trade(_trade_event())
     assert ev["quote_mint"] == "SOL" and ev["is_buy"] and ev["ix_name"] == "buy_exact_quote_in_v3"
