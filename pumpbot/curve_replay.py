@@ -375,10 +375,11 @@ def _summarize(trades: list[dict], replayed: list[dict], skipped: Counter) -> di
 
 def build_report(data_dir: str, out_dir: str, *, sol_usd: float,
                  stake_usd: float = 1.0, gas_usd: float = 0.0285,
-                 max_formula_error: float = MAX_FORMULA_REL_ERROR) -> dict:
+                 max_formula_error: float = MAX_FORMULA_REL_ERROR,
+                 tape_filename: str = "sniper_tape_sniper.jsonl") -> dict:
     if sol_usd <= 0 or stake_usd <= 0 or gas_usd < 0:
         raise ValueError("SOL/USD and stake must be positive; gas cannot be negative")
-    tape = read_jsonl(os.path.join(data_dir, "sniper_tape_sniper.jsonl"))
+    tape = read_jsonl(os.path.join(data_dir, tape_filename))
     launches = {
         row["mint"]: row for row in read_jsonl(os.path.join(data_dir, "sniper_launches_sniper.jsonl"))
         if row.get("mint")
@@ -430,6 +431,7 @@ def build_report(data_dir: str, out_dir: str, *, sol_usd: float,
     result = {
         "model": "counterfactual Pump bonding-curve replay; latency-aware sniper lanes only",
         "paper_only": True,
+        "tape_filename": tape_filename,
         "sol_usd_assumption": sol_usd,
         "stake_usd": stake_usd,
         "gas_usd_round_trip": gas_usd,
