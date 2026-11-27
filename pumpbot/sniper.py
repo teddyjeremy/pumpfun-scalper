@@ -43,6 +43,8 @@ class Launch:
     name: str
     create_signature: str
     quote_mint: str = SOL
+    is_mayhem_mode: bool = False
+    is_cashback_enabled: bool = False
     first_buy_signature: str | None = None
     first_buy_timestamp: int | None = None
     entry_pending: bool = False
@@ -152,6 +154,8 @@ class Sniper:
                     mint=mint, created_at=int(ev["timestamp"]), creator=ev.get("creator"),
                     symbol=ev.get("symbol") or mint[:8], name=ev.get("name") or "",
                     create_signature=signature, quote_mint=ev.get("quote_mint") or SOL,
+                    is_mayhem_mode=bool(ev.get("is_mayhem_mode")),
+                    is_cashback_enabled=bool(ev.get("is_cashback_enabled")),
                 )
                 self.launches[mint] = c
                 self.stats["creates"] += 1
@@ -160,7 +164,9 @@ class Sniper:
                 self.j.write("sniper_launches", {
                     "mint": mint, "symbol": c.symbol, "name": c.name, "creator": c.creator,
                     "created_at": c.created_at, "create_signature": signature, "slot": slot or 0,
-                    "quote_mint": c.quote_mint, "decision": "watching" if c.quote_mint == SOL else "observe_only_non_sol_quote",
+                    "quote_mint": c.quote_mint, "is_mayhem_mode": c.is_mayhem_mode,
+                    "is_cashback_enabled": c.is_cashback_enabled,
+                    "decision": "watching" if c.quote_mint == SOL else "observe_only_non_sol_quote",
                 })
             elif kind == "trade":
                 c = self.launches.get(ev["mint"])
@@ -181,7 +187,13 @@ class Sniper:
                     "price_sol": price or None, "sol_amount_raw": ev.get("sol_amount"),
                     "token_amount_raw": ev.get("token_amount"), "virtual_sol_reserves_raw": ev.get("virtual_sol_reserves"),
                     "virtual_token_reserves_raw": ev.get("virtual_token_reserves"),
-                    "fee_bps": ev.get("fee_bps"), "creator_fee_bps": ev.get("creator_fee_bps"),
+                    "fee_bps": ev.get("fee_bps"), "fee_raw": ev.get("fee"),
+                    "creator_fee_bps": ev.get("creator_fee_bps"), "creator_fee_raw": ev.get("creator_fee"),
+                    "buyback_bps": ev.get("buyback_bps"), "buyback_fee_raw": ev.get("buyback_fee"),
+                    "cashback_bps": ev.get("cashback_bps"), "cashback_fee_raw": ev.get("cashback"),
+                    "mayhem_mode": ev.get("mayhem_mode", c.is_mayhem_mode), "ix_name": ev.get("ix_name"),
+                    "real_sol_reserves_raw": ev.get("real_sol_reserves"),
+                    "real_token_reserves_raw": ev.get("real_token_reserves"),
                 })
                 if c.quote_mint != SOL or not price:
                     continue
