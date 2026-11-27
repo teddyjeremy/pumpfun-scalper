@@ -12,6 +12,7 @@ from .feed import Feed
 from .journal import Journal
 from .transaction_intel import TransactionAwareLane, build_transaction_summaries
 from .confirmation_lane import HighConvictionConfirmationLane
+from .cluster_wallet_guard import ClusterPortfolioWalletGuard
 
 DISCOVERY_SECONDS = int(os.environ.get("SNIPER_DISCOVERY_SECONDS", "3600"))
 TAIL_SECONDS = int(os.environ.get("SNIPER_TAIL_SECONDS", "600"))
@@ -74,6 +75,14 @@ class Sniper:
         # One-position portfolio lane: same multi-buyer rule, but a shared single slot.
         self.cluster_portfolio_pending: dict[str, dict] = {}
         self.cluster_portfolio_position: dict | None = None
+        # Isolated shadow candidate: lock a signal wallet after its first losing
+        # portfolio trade in this session. Existing multi-buyer portfolio is unchanged.
+        self.cluster_wallet_guard = ClusterPortfolioWalletGuard(
+            self.j, stake_usd=STAKE_USD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS,
+            max_hold_seconds=MAX_HOLD_SECONDS, confirm_seconds=ENTRY_CONFIRM_SECONDS,
+            entry_slippage=ENTRY_SLIPPAGE, exit_slippage=EXIT_SLIPPAGE,
+            fee_rate=FEE_RATE, gas_usd=ROUND_TRIP_GAS_USD,
+        )
         # Isolated lane: all signals, fills and marks use transaction-complete snapshots.
         self.tx_lane = TransactionAwareLane(
             self.j, stake_usd=STAKE_USD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS,
@@ -167,6 +176,7 @@ class Sniper:
                 self._shadow_process(c, ev, signature, price, t)
                 self._cluster_process(c, ev, signature, price, t)
                 self._cluster_portfolio_process(c, ev, signature, price, t)
+                self.cluster_wallet_guard.process(c, ev, signature, price, t)
                 self._trade_launch(c, ev, signature, price, t)
             elif kind == "complete":
                 c = self.launches.get(ev["mint"])
@@ -589,6 +599,7 @@ class Sniper:
             if now - p["entry_timestamp"] >= MAX_HOLD_SECONDS and p.get("last_price_sol"):
                 stale = max(0, int(now - p.get("last_price_timestamp", now)))
                 self._close_cluster_portfolio(p["last_price_sol"], int(now), 0, "timer", "time_cap_timer", stale)
+        self.cluster_wallet_guard.timer_tick(now)
         for mint, pending in list(self.cluster_pending.items()):
             if now - pending["signal_timestamp"] > ENTRY_CONFIRM_SECONDS:
                 self.cluster_pending.pop(mint, None)
@@ -643,7 +654,7 @@ class Sniper:
                 self.launches.pop(mint, None)
 
     async def run(self):
-        self.j.log("SNIPER PAPER ONLY: baseline and isolated research lanes; high-conviction lane requires signal, strong confirmation, then a later execution transaction; no signed or live transactions.")
+        self.j.log("SNIPER PAPER ONLY: baseline and isolated research lanes; wallet-loss guard is a separate multi-buyer shadow candidate; no signed or live transactions.")
         self.j.log(f"config discovery={DISCOVERY_SECONDS}s tail={TAIL_SECONDS}s fixed_paper_stake={STAKE_USD:.2f} TP={TAKE_PROFIT:.1%} SL={STOP_LOSS:.1%} max_hold={MAX_HOLD_SECONDS}s; v3 shadow TP={V3_TAKE_PROFIT:.1%} max_entry_age={V3_MAX_ENTRY_AGE_SECONDS}s one_entry_per_mint; no loss-based shutdown")
         feed = Feed(self.cfg.feed_ws_urls, self.on_events, self.j.log)
         feed_task = asyncio.create_task(feed.run())
@@ -670,6 +681,8 @@ class Sniper:
                 "shadow_positions_at_shutdown": list(self.shadow_positions.values()),
                 "cluster_positions_at_shutdown": list(self.cluster_positions.values()),
                 "cluster_portfolio_position_at_shutdown": self.cluster_portfolio_position,
+                "cluster_wallet_guard_position_at_shutdown": self.cluster_wallet_guard.position,
+                "cluster_wallet_guard_locked_wallet_count": len(self.cluster_wallet_guard.locked_wallets),
                 "transaction_lane_position_at_shutdown": self.tx_lane.position,
                 "transaction_lane_pending_count_at_shutdown": len(self.tx_lane.pending),
                 "high_conviction_position_at_shutdown": self.v2_lane.position,

@@ -41,6 +41,9 @@ def main():
     cluster_portfolio_entries = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_entries_sniper.jsonl"))
     cluster_portfolio_trades = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_trades_sniper.jsonl"))
     cluster_portfolio_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_portfolio_decisions_sniper.jsonl"))
+    wallet_guard_entries = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_wallet_guard_entries_sniper.jsonl"))
+    wallet_guard_trades = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_wallet_guard_trades_sniper.jsonl"))
+    wallet_guard_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_cluster_wallet_guard_decisions_sniper.jsonl"))
     tx_summaries = read_jsonl(os.path.join(args.data_dir, "sniper_transactions_sniper.jsonl"))
     tx_entries = read_jsonl(os.path.join(args.data_dir, "sniper_tx_entries_sniper.jsonl"))
     tx_trades = read_jsonl(os.path.join(args.data_dir, "sniper_tx_trades_sniper.jsonl"))
@@ -97,6 +100,10 @@ def main():
     cluster_portfolio_wins = [x for x in cluster_portfolio_trades if float(x.get("net_pnl_usd", 0)) > 0]
     cluster_portfolio_losses = [x for x in cluster_portfolio_trades if float(x.get("net_pnl_usd", 0)) <= 0]
     cluster_portfolio_decision_counts = Counter(x.get("decision", "unknown") for x in cluster_portfolio_decisions)
+    wallet_guard_wins = [x for x in wallet_guard_trades if float(x.get("net_pnl_usd", 0)) > 0]
+    wallet_guard_losses = [x for x in wallet_guard_trades if float(x.get("net_pnl_usd", 0)) <= 0]
+    wallet_guard_decision_counts = Counter(x.get("decision", "unknown") for x in wallet_guard_decisions)
+    wallet_guard_locked_wallets = {x.get("signal_wallet") for x in wallet_guard_decisions if x.get("decision") == "wallet_locked_after_loss" and x.get("signal_wallet")}
     tx_wins = [x for x in tx_trades if float(x.get("net_pnl_usd", 0)) > 0]
     tx_losses = [x for x in tx_trades if float(x.get("net_pnl_usd", 0)) <= 0]
     tx_decision_counts = Counter(x.get("decision", "unknown") for x in tx_decisions)
@@ -183,6 +190,14 @@ def main():
         "multi_buyer_one_position_net_pnl_usd": round(sum(float(x.get("net_pnl_usd", 0)) for x in cluster_portfolio_trades), 6),
         "multi_buyer_one_position_unclosed_entries": max(0, len(cluster_portfolio_entries) - len(cluster_portfolio_trades)),
         "multi_buyer_one_position_decisions": dict(cluster_portfolio_decision_counts),
+        "multi_buyer_wallet_guard_entries": len(wallet_guard_entries),
+        "multi_buyer_wallet_guard_closed_trades": len(wallet_guard_trades),
+        "multi_buyer_wallet_guard_wins": len(wallet_guard_wins),
+        "multi_buyer_wallet_guard_losses": len(wallet_guard_losses),
+        "multi_buyer_wallet_guard_win_rate": len(wallet_guard_wins) / len(wallet_guard_trades) if wallet_guard_trades else None,
+        "multi_buyer_wallet_guard_net_pnl_usd": round(sum(float(x.get("net_pnl_usd", 0)) for x in wallet_guard_trades), 6),
+        "multi_buyer_wallet_guard_locked_wallets": len(wallet_guard_locked_wallets),
+        "multi_buyer_wallet_guard_decisions": dict(wallet_guard_decision_counts),
         "transaction_summary_count": len(tx_summaries),
         "transaction_multi_buyer_count": len(tx_multi_buyer),
         "transaction_unique_mints": len({x.get("mint") for x in tx_summaries}),
@@ -342,6 +357,14 @@ def main():
         f"- Win rate: **{summary['multi_buyer_one_position_win_rate']:.1%}**" if summary["multi_buyer_one_position_win_rate"] is not None else "- Win rate: n/a",
         f"- Net simulated P&L: **${summary['multi_buyer_one_position_net_pnl_usd']:.4f}**",
         f"- Decisions: **{summary['multi_buyer_one_position_decisions']}**",
+        "", "### Multi-buyer wallet-loss guard shadow lane",
+        "- Rules: same one-position multi-buyer entry and exit logic; after a losing trade, block subsequent signals from that trade's first-buyer signal wallet for the rest of this session. Other wallets remain eligible.",
+        f"- Entries / closed trades: **{summary['multi_buyer_wallet_guard_entries']} / {summary['multi_buyer_wallet_guard_closed_trades']}**",
+        f"- Wins / losses: **{summary['multi_buyer_wallet_guard_wins']} / {summary['multi_buyer_wallet_guard_losses']}**",
+        f"- Win rate: **{summary['multi_buyer_wallet_guard_win_rate']:.1%}**" if summary['multi_buyer_wallet_guard_win_rate'] is not None else "- Win rate: n/a",
+        f"- Net simulated P&L: **${summary['multi_buyer_wallet_guard_net_pnl_usd']:.4f}**",
+        f"- Signal wallets locked after a loss: **{summary['multi_buyer_wallet_guard_locked_wallets']}**",
+        f"- Decisions: **{summary['multi_buyer_wallet_guard_decisions']}**",
         "", "### Portfolio capacity comparison",
     ]
     lines.extend(f"- {cap} concurrent: {v['trades']} trades, {v['wins']} wins, {v['losses']} losses, net ${v['net_pnl_usd']:.4f}" for cap, v in capacity_results.items())
