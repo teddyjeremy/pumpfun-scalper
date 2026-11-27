@@ -64,3 +64,18 @@ def test_build_report_handles_overlapping_lanes_and_missing_files(tmp_path):
     assert "1500ms" not in report["lanes"]
     assert (out / "sniper_exit_risk_diagnostics.json").exists()
     assert (out / "sniper_exit_risk_diagnostics.md").exists()
+
+def test_original_trigger_is_not_used_as_a_later_slot_warning_mark():
+    tape = [
+        event("entry", 10, "buy", 1.0, 30_000_000_000, 100_000_000),
+        event("pre-trigger-sell", 11, "sell", 0.9, 30_000_000_000, 1_000_000_000),
+        event("exit-trigger", 12, "sell", 0.8, 29_000_000_000, 1_000_000_000),
+    ]
+    trade = {
+        "mint": "mint", "entry_signature": "entry",
+        "exit_trigger_signature": "exit-trigger", "entry_slot": 10,
+        "exit_trigger_slot": 12, "entry_price_sol": 1.0,
+        "exit_observed_at_epoch": 115,
+    }
+    result = _analyze_trade(trade, tape, {row["signature"]: i for i, row in enumerate(tape)})
+    assert result["sell_events"][0]["next_later_slot_signature"] is None
