@@ -166,25 +166,55 @@ def _fee_bps(event: dict) -> tuple[int, int]:
     return int(event.get("fee_bps") or 0), int(event.get("creator_fee_bps") or 0)
 
 
+def _first_later_slot_index(mint_tape: list[dict], after_index: int, slot: int) -> int | None:
+    """First observed event strictly after the decision slot."""
+    for index in range(after_index + 1, len(mint_tape)):
+        if int(mint_tape[index].get("slot") or 0) > slot:
+            return index
+    return None
+
+
 def _replay_one(trade: dict, mint_tape: list[dict], signature_indices: dict[str, int],
                 complete_slots: set[int], *, sol_usd: float, stake_usd: float,
                 gas_usd: float, max_formula_error: float,
-                launch: dict | None = None) -> dict:
+                launch: dict | None = None, fill_policy: str = "after_observed") -> dict:
     mint = trade["mint"]
     entry_signature, exit_signature = trade.get("entry_signature"), trade.get("exit_signature")
     if not entry_signature or not exit_signature or exit_signature == "timer":
         return {"status": "missing_executable_signature"}
     if entry_signature not in signature_indices or exit_signature not in signature_indices:
         return {"status": "missing_tape_signature"}
-    entry_index, exit_index = signature_indices[entry_signature], signature_indices[exit_signature]
-    if exit_index <= entry_index:
+    entry_decision_index = signature_indices[entry_signature]
+    exit_trigger_index = signature_indices[exit_signature]
+    if exit_trigger_index <= entry_decision_index:
         return {"status": "invalid_entry_exit_order"}
+    entry_decision_event = mint_tape[entry_decision_index]
+    exit_trigger_event = mint_tape[exit_trigger_index]
+    entry_decision_slot = int(entry_decision_event.get("slot") or 0)
+    exit_trigger_slot = int(exit_trigger_event.get("slot") or 0)
+    if exit_trigger_slot <= entry_decision_slot:
+        return {"status": "not_later_slot"}
+    if launch and launch.get("is_cashback_enabled"):
+        return {"status": "unsupported_cashback_launch"}
+
+    if fill_policy == "after_observed":
+        entry_index, exit_index = entry_decision_index, exit_trigger_index
+    elif fill_policy == "next_later_slot":
+        entry_index = _first_later_slot_index(mint_tape, entry_decision_index, entry_decision_slot)
+        if entry_index is None:
+            return {"status": "no_later_slot_entry_fill"}
+        if entry_index >= exit_trigger_index:
+            return {"status": "exit_trigger_before_entry_fill"}
+        exit_index = _first_later_slot_index(mint_tape, exit_trigger_index, exit_trigger_slot)
+        if exit_index is None:
+            return {"status": "no_later_slot_exit_fill"}
+    else:
+        return {"status": "unknown_fill_policy"}
+
     entry_event, exit_event = mint_tape[entry_index], mint_tape[exit_index]
     entry_slot, exit_slot = int(entry_event.get("slot") or 0), int(exit_event.get("slot") or 0)
     if exit_slot <= entry_slot:
         return {"status": "not_later_slot"}
-    if launch and launch.get("is_cashback_enabled"):
-        return {"status": "unsupported_cashback_launch"}
 
     interval = mint_tape[entry_index + 1:exit_index + 1]
     # Pump V3 supports Mayhem curves. Their special fee recipient does not
@@ -250,6 +280,11 @@ def _replay_one(trade: dict, mint_tape: list[dict], signature_indices: dict[str,
         "symbol": trade.get("symbol"),
         "entry_signature": entry_signature,
         "exit_signature": exit_signature,
+        "fill_policy": fill_policy,
+        "entry_fill_signature": entry_event.get("signature"),
+        "exit_fill_signature": exit_event.get("signature"),
+        "entry_decision_slot": entry_decision_slot,
+        "exit_trigger_slot": exit_trigger_slot,
         "entry_slot": entry_slot,
         "exit_slot": exit_slot,
         "external_events_replayed": len(interval),
@@ -334,25 +369,31 @@ def build_report(data_dir: str, out_dir: str, *, sol_usd: float,
         by_mint[mint].append(row)
 
     lane_results, all_details = {}, {}
+    next_slot_results, next_slot_details = {}, {}
     for lane_name, filename in LANES.items():
         trades = read_jsonl(os.path.join(data_dir, filename))
-        replayed, skipped = [], Counter()
-        for trade in trades:
-            mint = trade.get("mint")
-            if mint not in by_mint:
-                skipped["mint_missing_from_sol_tape"] += 1
-                continue
-            result = _replay_one(
-                trade, by_mint[mint], signatures[mint], complete_by_mint[mint],
-                sol_usd=sol_usd, stake_usd=stake_usd, gas_usd=gas_usd,
-                max_formula_error=max_formula_error, launch=launches.get(mint),
-            )
-            if result["status"] == "ok":
-                replayed.append(result)
-            else:
-                skipped[result["status"]] += 1
-        lane_results[lane_name] = _summarize(trades, replayed, skipped)
-        all_details[lane_name] = replayed
+        for fill_policy, summaries, details in (
+            ("after_observed", lane_results, all_details),
+            ("next_later_slot", next_slot_results, next_slot_details),
+        ):
+            replayed, skipped = [], Counter()
+            for trade in trades:
+                mint = trade.get("mint")
+                if mint not in by_mint:
+                    skipped["mint_missing_from_sol_tape"] += 1
+                    continue
+                replay = _replay_one(
+                    trade, by_mint[mint], signatures[mint], complete_by_mint[mint],
+                    sol_usd=sol_usd, stake_usd=stake_usd, gas_usd=gas_usd,
+                    max_formula_error=max_formula_error, launch=launches.get(mint),
+                    fill_policy=fill_policy,
+                )
+                if replay["status"] == "ok":
+                    replayed.append(replay)
+                else:
+                    skipped[replay["status"]] += 1
+            summaries[lane_name] = _summarize(trades, replayed, skipped)
+            details[lane_name] = replayed
 
     result = {
         "model": "counterfactual Pump bonding-curve replay; latency-aware sniper lanes only",
@@ -361,11 +402,17 @@ def build_report(data_dir: str, out_dir: str, *, sol_usd: float,
         "stake_usd": stake_usd,
         "gas_usd_round_trip": gas_usd,
         "max_formula_relative_error": max_formula_error,
+        "fill_policy_definitions": {
+            "after_observed": "Optimistic lower bound: hypothetical buy/sell immediately after the selected entry/exit observation transaction.",
+            "next_later_slot": "Conservative sensitivity: wait through the decision slot and all same-slot transactions, then fill after the first observed transaction in a later slot; repeat after the exit trigger.",
+        },
         "lanes": lane_results,
+        "next_later_slot_lanes": next_slot_results,
         "trades": all_details,
+        "next_later_slot_trades": next_slot_details,
         "method": [
             "Use each lane's already-recorded entry and exit signatures; do not change signal or exit decisions.",
-            "Assume the hypothetical buy lands immediately after the selected entry transaction and the sell immediately after the selected exit transaction.",
+            "Report both an optimistic fill immediately after each selected observation and a next-later-slot sensitivity that waits through same-slot transactions before entry and exit.",
             "Buy size is stake_usd converted to SOL using the supplied SOL/USD reference price.",
             "Buy quote uses Pump's documented exact-quote-in fee rounding and net_quote_in minus one lamport formula.",
             "Each later observed buy keeps its SOL input fixed; each later observed sell keeps its token input fixed; outputs are recalculated against counterfactual reserves.",
@@ -396,18 +443,18 @@ def build_report(data_dir: str, out_dir: str, *, sol_usd: float,
         f"- Round-trip gas assumption: {gas_usd:.4f} USD",
         "- Signals and exits: unchanged; only existing latency-aware sniper trades are re-quoted.",
         "",
-        "| Lane | Trades | Replayed | Wins | Losses | Net curve P&L | Avg / trade | Recorded P&L on same trades |",
+        "| Lane | Trades | Immediate replay | Immediate W/L | Immediate P&L | Next-slot replay | Next-slot W/L | Next-slot P&L |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for lane, summary in lane_results.items():
+        strict = next_slot_results[lane]
         lines.append(
             f"| {lane} | {summary['trades_in_lane']} | {summary['replayed_trades']} | "
-            f"{summary['wins']} | {summary['losses']} | "
-            f"{summary['curve_replay_net_pnl_usd']:.4f} USD | "
-            f"{summary['curve_replay_average_pnl_usd'] or 0.0:.4f} USD | "
-            f"{summary['recorded_paper_pnl_same_replayed_trades_usd']:.4f} USD |"
+            f"{summary['wins']}/{summary['losses']} | {summary['curve_replay_net_pnl_usd']:.4f} USD | "
+            f"{strict['replayed_trades']} | {strict['wins']}/{strict['losses']} | "
+            f"{strict['curve_replay_net_pnl_usd']:.4f} USD |"
         )
-    lines += ["", "## Method and limitations", ""]
+    lines += ["", "The immediate-after-observation model is optimistic. The next-later-slot column waits through all same-slot events before entering and again before exiting; it is still a sensitivity model, not a confirmed transaction fill.", "", "## Method and limitations", ""]
     lines.extend(f"- {item}" for item in result["method"])
     lines.extend(["", "### Limitations", ""])
     lines.extend(f"- {item}" for item in result["limitations"])
