@@ -433,3 +433,64 @@ def test_transaction_capture_records_feed_latency_and_observation_sequence(tmp_p
     assert rows[0]["feed_latency_seconds"] == 0.375
     assert rows[0]["observed_at_epoch"] == 1001.375
     assert rows[0]["observation_sequence"] > 0
+
+
+
+def test_v3_quality_candidate_rejects_entry_after_ten_seconds_without_changing_v2(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+
+    signal = [
+        dict(trade_event(1008, user=BUYER)[1], sol_amount=300_000_000),
+        dict(trade_event(1008, user=BUYER2)[1], sol_amount=300_000_000),
+    ]
+    bot.on_events([("trade", x) for x in signal], "v3-age-signal", 2, bot.started + 1)
+
+    confirmation = [
+        dict(trade_event(1009, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000),
+        dict(trade_event(1009, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000),
+    ]
+    bot.on_events([("trade", x) for x in confirmation], "v3-age-confirmation", 3, bot.started + 2)
+
+    bot.on_events([trade_event(1011, user=BUYER, price_mult=1.20)],
+                  "v3-age-execution", 4, bot.started + 3)
+
+    assert bot.v2_lane.position is not None
+    assert bot.v3_lane.position is None
+    decisions = bot.j.read_kind("sniper_v3_decisions")
+    assert any(x["decision"] == "rejected_entry_age" and x["entry_t_plus"] == 11 for x in decisions)
+    assert bot.v2_lane.take_profit == 0.20
+    assert bot.v3_lane.take_profit == 0.25
+
+
+def test_v3_quality_candidate_allows_only_one_entry_per_mint(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+
+    def signal_and_confirm(signal_ts, confirm_ts, prefix):
+        signal = [
+            dict(trade_event(signal_ts, user=BUYER)[1], sol_amount=300_000_000),
+            dict(trade_event(signal_ts, user=BUYER2)[1], sol_amount=300_000_000),
+        ]
+        bot.on_events([("trade", x) for x in signal], f"{prefix}-signal", 2, bot.started + 1)
+        confirmation = [
+            dict(trade_event(confirm_ts, user=BUYER, price_mult=1.0)[1], sol_amount=300_000_000),
+            dict(trade_event(confirm_ts, user=BUYER2, price_mult=1.10)[1], sol_amount=300_000_000),
+        ]
+        bot.on_events([("trade", x) for x in confirmation], f"{prefix}-confirmation", 3, bot.started + 2)
+
+    signal_and_confirm(1001, 1002, "first")
+    bot.on_events([trade_event(1003, user=BUYER, price_mult=1.20)], "first-execution", 4, bot.started + 3)
+    assert bot.v3_lane.position is not None
+
+    bot.on_events([trade_event(1004, buy=False, user=BUYER, price_mult=1.60)],
+                  "first-take-profit", 5, bot.started + 4)
+    assert bot.v3_lane.position is None
+    assert len(bot.j.read_kind("sniper_v3_trades")) == 1
+
+    signal_and_confirm(1005, 1006, "second")
+    bot.on_events([trade_event(1007, user=BUYER, price_mult=1.20)], "second-execution", 6, bot.started + 7)
+
+    assert bot.v3_lane.position is None
+    decisions = bot.j.read_kind("sniper_v3_decisions")
+    assert any(x["decision"] == "rejected_mint_already_traded" for x in decisions)
