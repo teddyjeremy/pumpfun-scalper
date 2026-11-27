@@ -63,7 +63,7 @@ def test_exit_uses_later_slot_after_delay_and_keeps_unclosed_position():
     ]
     result = replay_lane(rows, latency_seconds=0.5, wallet_loss_guard=False,
                          positive_entry_flow=False)
-    assert result["position"] if "position" in result else result["open_position"] is None
+    assert result["open_position"] is None
     trade = result["trades"][0]
     assert trade["exit_signature"] == "delayed-exit"
     assert trade["exit_price_sol"] == 1.10
