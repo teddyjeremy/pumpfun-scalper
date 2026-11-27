@@ -171,10 +171,24 @@ def _fee_bps(event: dict) -> tuple[int, int]:
 
 
 def _first_later_slot_index(mint_tape: list[dict], after_index: int, slot: int) -> int | None:
-    """First observed event strictly after the decision slot."""
-    for index in range(after_index + 1, len(mint_tape)):
+    """Final event row of the first captured transaction in a strictly later slot.
+
+    A single Solana transaction can emit multiple Pump trade events. Those events
+    are atomic from an external trader's perspective: a fill cannot occur between
+    inner events in the same signature. Tape rows for one signature are appended
+    contiguously by the feed callback, so advance to that signature's final row.
+    """
+    index = after_index + 1
+    while index < len(mint_tape):
         if int(mint_tape[index].get("slot") or 0) > slot:
+            signature = mint_tape[index].get("signature")
+            while (
+                index + 1 < len(mint_tape)
+                and mint_tape[index + 1].get("signature") == signature
+            ):
+                index += 1
             return index
+        index += 1
     return None
 
 
@@ -299,6 +313,8 @@ def _replay_one(trade: dict, mint_tape: list[dict], signature_indices: dict[str,
         "fill_policy": fill_policy,
         "entry_fill_signature": entry_event.get("signature"),
         "exit_fill_signature": exit_event.get("signature"),
+        "entry_fill_event_index": entry_index,
+        "exit_fill_event_index": exit_index,
         "entry_decision_slot": entry_decision_slot,
         "exit_trigger_slot": exit_trigger_slot,
         "entry_slot": entry_slot,
