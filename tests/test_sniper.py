@@ -543,3 +543,50 @@ def test_wallet_guard_does_not_lock_a_wallet_after_a_winning_trade(tmp_path):
     bot.on_events([trade_event(1003, buy=False, price_mult=1.25, user=BUYER2)], "wallet-tp", 4, bot.started + 3)
     assert bot.cluster_wallet_guard.position is None
     assert BUYER not in bot.cluster_wallet_guard.locked_wallets
+
+
+
+def test_wallet_guard_locks_only_the_signal_wallet_after_its_first_loss(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001, user=BUYER)], "wallet-signal", 2, bot.started + 1)
+    bot.on_events([trade_event(1001, user=BUYER2)], "wallet-signal", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, buy=False, user=BUYER2)], "wallet-entry", 3, bot.started + 2)
+    assert bot.cluster_wallet_guard.position is not None
+    assert bot.cluster_wallet_guard.position["signal_wallet"] == BUYER
+
+    bot.on_events([trade_event(1003, buy=False, price_mult=0.70, user=BUYER2)], "wallet-stop", 4, bot.started + 3)
+    assert bot.cluster_wallet_guard.position is None
+    assert BUYER in bot.cluster_wallet_guard.locked_wallets
+
+    second_mint = "SecondMint111111111111111111111111111111111"
+    second_create = dict(create_event()[1], mint=second_mint, symbol="SECOND")
+    bot.on_events([("create", second_create)], "second-create", 5, bot.started + 4)
+    bot.on_events([("trade", dict(trade_event(1004, user=BUYER)[1], mint=second_mint))],
+                  "locked-wallet-signal", 6, bot.started + 5)
+    decisions = bot.j.read_kind("sniper_cluster_wallet_guard_decisions")
+    assert decisions[-1]["decision"] == "rejected_wallet_locked"
+    assert decisions[-1]["signal_wallet"] == BUYER
+
+    third_mint = "ThirdMint111111111111111111111111111111111"
+    third_create = dict(create_event()[1], mint=third_mint, symbol="THIRD")
+    bot.on_events([("create", third_create)], "third-create", 7, bot.started + 6)
+    bot.on_events([("trade", dict(trade_event(1005, user=BUYER2)[1], mint=third_mint))],
+                  "other-wallet-signal", 8, bot.started + 7)
+    bot.on_events([("trade", dict(trade_event(1005, user=BUYER)[1], mint=third_mint))],
+                  "other-wallet-signal", 8, bot.started + 7)
+    bot.on_events([("trade", dict(trade_event(1006, buy=False, user=BUYER)[1], mint=third_mint))],
+                  "other-wallet-entry", 9, bot.started + 8)
+    assert bot.cluster_wallet_guard.position is not None
+    assert bot.cluster_wallet_guard.position["mint"] == third_mint
+
+
+def test_wallet_guard_does_not_lock_a_wallet_after_a_winning_trade(tmp_path):
+    bot = make_sniper(tmp_path)
+    bot.on_events([create_event()], "create-sig", 1, bot.started)
+    bot.on_events([trade_event(1001, user=BUYER)], "wallet-signal", 2, bot.started + 1)
+    bot.on_events([trade_event(1001, user=BUYER2)], "wallet-signal", 2, bot.started + 1)
+    bot.on_events([trade_event(1002, buy=False, user=BUYER2)], "wallet-entry", 3, bot.started + 2)
+    bot.on_events([trade_event(1003, buy=False, price_mult=1.25, user=BUYER2)], "wallet-tp", 4, bot.started + 3)
+    assert bot.cluster_wallet_guard.position is None
+    assert BUYER not in bot.cluster_wallet_guard.locked_wallets
