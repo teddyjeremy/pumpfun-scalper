@@ -48,9 +48,7 @@ class LatencyAwareWalletGuard:
         observed = float(observed)
 
         pos = self.position
-        if pos:
-            if pos["mint"] != mint:
-                return
+        if pos and pos["mint"] == mint:
             if pos.get("pending_exit"):
                 trigger = pos["pending_exit"]
                 if (tx["signature"] != trigger["signature"]
@@ -109,6 +107,13 @@ class LatencyAwareWalletGuard:
                 self._write("decisions", {
                     "mint": mint, "decision": "rejected_wallet_locked",
                     "signal_wallet": signal_wallet,
+                })
+                return
+            if self.position is not None:
+                self.pending.pop(mint, None)
+                self._write("decisions", {
+                    "mint": mint, "decision": "rejected_portfolio_busy",
+                    "occupied_mint": self.position["mint"],
                 })
                 return
             entry = {
