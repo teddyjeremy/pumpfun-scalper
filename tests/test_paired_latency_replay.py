@@ -85,3 +85,36 @@ def test_single_buyer_candidate_is_rejected_before_later_multi_buyer_signal():
     assert len(result["entries"]) == 1
     assert result["entries"][0]["signal_signature"] == "qualified-signal"
     assert result["entries"][0]["entry_signature"] == "entry"
+
+
+
+def test_expired_signal_is_removed_before_current_transaction_becomes_new_signal():
+    mint = "ExpiryMint"
+    rows = [
+        row(mint, "old-signal", 1, 100.0, 1.0),
+        row("OtherMint", "other-event", 2, 104.0, 1.0),
+        row(mint, "fresh-signal", 3, 104.1, 1.0),
+        row(mint, "fresh-entry", 4, 104.7, 1.0, buyers=["EntryBuyer"]),
+    ]
+    result = replay_lane(rows, latency_seconds=0.5, wallet_loss_guard=False,
+                         positive_entry_flow=False, confirm_seconds=3.0)
+    assert len(result["entries"]) == 1
+    assert result["entries"][0]["signal_signature"] == "fresh-signal"
+    assert result["entries"][0]["entry_signature"] == "fresh-entry"
+
+
+def test_time_cap_is_triggered_by_timer_before_next_same_mint_transaction():
+    mint = "TimerMint"
+    rows = [
+        row(mint, "signal", 1, 100.0, 1.0),
+        row(mint, "entry", 2, 100.6, 1.0, buyers=["EntryBuyer"]),
+        row("OtherMint", "timer-tick", 3, 130.7, 1.0),
+        row(mint, "delayed-exit", 4, 131.2, 1.0, buyers=["ExitBuyer"]),
+    ]
+    result = replay_lane(rows, latency_seconds=0.5, wallet_loss_guard=False,
+                         positive_entry_flow=False, max_hold_seconds=30)
+    assert len(result["trades"]) == 1
+    trade = result["trades"][0]
+    assert trade["exit_reason"] == "time_cap"
+    assert trade["exit_trigger_signature"] == "entry"
+    assert trade["exit_latency_seconds"] == 0.6
