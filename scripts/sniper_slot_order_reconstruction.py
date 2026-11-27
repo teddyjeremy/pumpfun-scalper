@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="./data")
     parser.add_argument("--out", default="./report")
-    parser.add_argument("--delay", type=float, default=0.05,
+    parser.add_argument("--delay", type=float, default=0.15,
                         help="Seconds between confirmed-block RPC requests")
     args = parser.parse_args()
     api_key = os.environ.get("HELIUS_API_KEY", "").strip()
