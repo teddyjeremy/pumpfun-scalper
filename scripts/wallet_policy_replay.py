@@ -54,7 +54,9 @@ def replay(rows, delay, policy_name, loss_limit, cooldown, flow_gate=False,
         if position and not position.get("trigger") and now >= position["entry_time"] + max_hold:
             position["trigger"] = {"reason":"time_cap", "sig":position["last_sig"],
                 "slot":position["last_slot"], "time":position["entry_time"]+max_hold,
-                "price":position["last_px"]}
+                "price":position["last_px"],
+                "vsol_raw":position.get("last_vsol_raw"),
+                "vtoken_raw":position.get("last_vtoken_raw")}
             decisions["time_cap_trigger"] += 1
         if position and position["mint"] == mint:
             trigger = position.get("trigger")
@@ -64,7 +66,10 @@ def replay(rows, delay, policy_name, loss_limit, cooldown, flow_gate=False,
                     pnl = stake * ((fill / position["entry_fill"]) * (1-fee)**2 - 1) - gas
                     trades.append({**position, "exit_sig":sig, "exit_slot":slot,
                         "exit_time":now, "exit_px":px, "exit_reason":trigger["reason"],
-                        "exit_trigger_px":trigger["price"], "exit_latency":now-trigger["time"],
+                        "exit_trigger_px":trigger["price"],
+                        "exit_trigger_vsol_raw":trigger.get("vsol_raw"),
+                        "exit_trigger_vtoken_raw":trigger.get("vtoken_raw"),
+                        "exit_latency":now-trigger["time"],
                         "exit_vsol_raw":tx.get("final_virtual_sol_reserves_raw"),
                         "exit_vtoken_raw":tx.get("final_virtual_token_reserves_raw"),
                         "net_pnl_usd":round(pnl,6)})
@@ -78,10 +83,14 @@ def replay(rows, delay, policy_name, loss_limit, cooldown, flow_gate=False,
             reason = "take_profit" if move >= tp else "stop_loss" if move <= -sl else None
             if reason:
                 position["trigger"] = {"reason":reason,"sig":sig,"slot":slot,
-                    "time":now,"price":px}
+                    "time":now,"price":px,
+                    "vsol_raw":tx.get("final_virtual_sol_reserves_raw"),
+                    "vtoken_raw":tx.get("final_virtual_token_reserves_raw")}
                 decisions["exit_"+reason] += 1
             else:
-                position.update(last_sig=sig,last_slot=slot,last_time=now,last_px=px)
+                position.update(last_sig=sig,last_slot=slot,last_time=now,last_px=px,
+                    last_vsol_raw=tx.get("final_virtual_sol_reserves_raw"),
+                    last_vtoken_raw=tx.get("final_virtual_token_reserves_raw"))
             continue
         candidate = pending.get(mint)
         if candidate:
