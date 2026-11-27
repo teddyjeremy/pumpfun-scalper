@@ -59,6 +59,27 @@ def replay_lane(rows, *, latency_seconds, wallet_loss_guard, positive_entry_flow
         slot = int(tx.get("slot") or 0)
         signature = tx.get("signature")
 
+        # Reproduce the runtime's timer_tick behavior before handling this event.
+        # Expired candidates are removed before this transaction is processed, so
+        # the transaction can become a fresh signal rather than being discarded.
+        for pending_mint, candidate in list(pending.items()):
+            if observed - candidate["signal_observed_at_epoch"] > confirm_seconds:
+                pending.pop(pending_mint, None)
+                decisions["entry_expired"] += 1
+
+        # The live lane starts its time-cap exit from a timer tick, not from the
+        # next same-mint transaction. Replay that deadline using the captured
+        # event clock and the last observed reserve mark.
+        if (position and not position.get("pending_exit")
+                and observed >= position["entry_observed_at_epoch"] + max_hold_seconds):
+            due = position["entry_observed_at_epoch"] + max_hold_seconds
+            position["pending_exit"] = {
+                "reason": "time_cap", "signature": position["last_signature"],
+                "slot": position["last_slot"], "observed_at_epoch": due,
+                "price": position["last_price_sol"],
+            }
+            decisions["exit_trigger_time_cap"] += 1
+
         if position and position["mint"] == mint:
             if position.get("pending_exit"):
                 trigger = position["pending_exit"]
@@ -92,25 +113,24 @@ def replay_lane(rows, *, latency_seconds, wallet_loss_guard, positive_entry_flow
             if signature == position["entry_signature"] or slot <= position["entry_slot"]:
                 continue
             move = price / position["entry_price_sol"] - 1.0
-            held = observed - position["entry_observed_at_epoch"]
             reason = ("take_profit" if move >= take_profit else
-                      "stop_loss" if move <= -stop_loss else
-                      "time_cap" if held >= max_hold_seconds else None)
+                      "stop_loss" if move <= -stop_loss else None)
             if reason:
                 position["pending_exit"] = {
                     "reason": reason, "signature": signature, "slot": slot,
                     "observed_at_epoch": observed, "price": price,
                 }
                 decisions[f"exit_trigger_{reason}"] += 1
+            else:
+                position["last_signature"] = signature
+                position["last_slot"] = slot
+                position["last_observed_at_epoch"] = observed
+                position["last_price_sol"] = price
             continue
 
         candidate = pending.get(mint)
         if candidate:
             elapsed = observed - candidate["signal_observed_at_epoch"]
-            if elapsed > confirm_seconds:
-                pending.pop(mint, None)
-                decisions["entry_expired"] += 1
-                continue
             if (signature == candidate["signal_signature"] or slot <= candidate["signal_slot"]
                     or elapsed < latency_seconds):
                 continue
@@ -151,6 +171,8 @@ def replay_lane(rows, *, latency_seconds, wallet_loss_guard, positive_entry_flow
                 "entry_creator_sell": bool(tx.get("creator_sell")),
                 "entry_price_sol": price,
                 "entry_fill_price_sol": price * (1.0 + entry_slippage),
+                "last_signature": signature, "last_slot": slot,
+                "last_observed_at_epoch": observed, "last_price_sol": price,
             }
             pending.pop(mint, None)
             entries.append(entry)
@@ -267,7 +289,8 @@ def build_report(data_dir, out_dir):
         "- This is a paired offline replay, not a new live or paper execution lane. Existing strategy code and decisions are untouched.",
         "- Entry/exit prices are captured reserve-derived transaction marks with configured slippage, fees, and gas. They are not executable Pump.fun sell quotes or confirmed fills.",
         "- An exit trigger waits for a later transaction in a later slot after the assumed delay; positions without an eligible exit remain open and are not force-closed.",
-        "- Time-cap is detected on the first observed same-mint transaction at or after the hold limit; no synthetic price is created between observations.",
+        "- Pending-signal expiry and max-hold timer ticks are replayed before each captured transaction. A time-cap trigger uses the last observed reserve mark and its timer deadline; exit still requires a later-slot transaction after the configured delay.",
+        "- Timer behavior is reconstructed from captured event timestamps, so it is close to but not a byte-for-byte replay of the runtime wall-clock scheduler.",
         "- Variants share the same market stream and may trade overlapping mints. Their P&Ls are paired comparisons, not independent or additive.",
         "- The positive-flow variant requires the execution transaction to contain at least one buy, positive net SOL flow, and no creator sell. It does not require overlap with signal buyers.",
         "- No lane should be promoted from one session. Evaluate across independent sessions and then validate with actual curve quotes and order simulation.",
