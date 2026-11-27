@@ -107,6 +107,10 @@ jobs:
         if: always()
         run: python scripts/market_microstructure_research.py --data-dir ./data --out ./report
 
+      - name: Build sniper exit-risk diagnostics
+        if: always()
+        run: python scripts/sniper_exit_risk_diagnostics.py --data-dir ./data --out ./report
+
       - name: Upload sniper observation
         if: always()
         uses: actions/upload-artifact@v4
