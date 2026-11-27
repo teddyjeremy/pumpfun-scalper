@@ -79,3 +79,42 @@ def test_observed_transition_rejects_a_reserve_gap():
     }
     result = validate_observed_transition(previous, event)
     assert not result["ok"] and result["reason"] == "reserve_gap"
+
+
+
+def test_mayhem_v3_curve_is_supported_for_non_completing_window():
+    from pumpbot.curve_replay import _replay_one
+
+    mint = "MayhemMint"
+    vq, vt = 30_000_000_000, 1_000_000_000_000_000
+    quote = 100_000_000
+    tokens = (quote - 1) * vt // (vq + quote - 1)
+    entry = {
+        "mint": mint, "signature": "entry", "slot": 10, "side": "buy",
+        "sol_amount_raw": quote, "token_amount_raw": tokens,
+        "virtual_sol_reserves_raw": vq + quote,
+        "virtual_token_reserves_raw": vt - tokens,
+        "real_token_reserves_raw": 700_000_000_000_000,
+        "fee_bps": 95, "creator_fee_bps": 30,
+        "mayhem_mode": True, "cashback_bps": 0, "cashback": 0,
+    }
+    next_quote = 10_000_000
+    next_tokens = (next_quote - 1) * (vt - tokens) // (vq + quote + next_quote - 1)
+    exit_event = {
+        "mint": mint, "signature": "exit", "slot": 11, "side": "buy",
+        "sol_amount_raw": next_quote, "token_amount_raw": next_tokens,
+        "virtual_sol_reserves_raw": vq + quote + next_quote,
+        "virtual_token_reserves_raw": vt - tokens - next_tokens,
+        "real_token_reserves_raw": 699_000_000_000_000,
+        "fee_bps": 95, "creator_fee_bps": 30,
+        "mayhem_mode": True, "cashback_bps": 0, "cashback": 0,
+    }
+    result = _replay_one(
+        {"mint": mint, "entry_signature": "entry", "exit_signature": "exit",
+         "net_pnl_usd": -0.1, "market_move_at_exit": 0.02},
+        [entry, exit_event], {"entry": 0, "exit": 1}, set(),
+        sol_usd=73.35, stake_usd=1.0, gas_usd=0.0285,
+        max_formula_error=1e-4,
+        launch={"is_mayhem_mode": True, "is_cashback_enabled": False},
+    )
+    assert result["status"] == "ok"
