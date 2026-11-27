@@ -1,0 +1,31 @@
+name: Research replay tests
+
+on:
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "pumpbot/**"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/research-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run tests
+        run: pytest -q
+      - name: Compile Python
+        run: python -m compileall -q pumpbot scripts tests
