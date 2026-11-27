@@ -109,7 +109,7 @@ def fetch_confirmed_block(
     slot: int,
     api_key: str,
     *,
-    delay_seconds: float = 0.05,
+    delay_seconds: float = 0.15,
     opener: Callable = urllib.request.urlopen,
     retries: int = 4,
 ) -> dict:
