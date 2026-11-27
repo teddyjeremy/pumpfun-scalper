@@ -69,3 +69,19 @@ def test_exit_uses_later_slot_after_delay_and_keeps_unclosed_position():
     assert trade["exit_price_sol"] == 1.10
     assert trade["exit_trigger_price_sol"] == 1.25
     assert trade["exit_latency_slots"] == 1
+
+
+
+def test_single_buyer_candidate_is_rejected_before_later_multi_buyer_signal():
+    mint = "SignalMint"
+    rows = [
+        row(mint, "single-buyer-signal", 1, 100.0, 1.0, buyers=["OnlyOne"]),
+        row(mint, "first-followup", 2, 100.6, 1.0, buyers=["BuyerX", "BuyerY"]),
+        row(mint, "qualified-signal", 3, 101.0, 1.0, buyers=["BuyerA", "BuyerB"]),
+        row(mint, "entry", 4, 101.6, 1.0, buyers=["EntryBuyer"]),
+    ]
+    result = replay_lane(rows, latency_seconds=0.5, wallet_loss_guard=False,
+                         positive_entry_flow=False)
+    assert len(result["entries"]) == 1
+    assert result["entries"][0]["signal_signature"] == "qualified-signal"
+    assert result["entries"][0]["entry_signature"] == "entry"
