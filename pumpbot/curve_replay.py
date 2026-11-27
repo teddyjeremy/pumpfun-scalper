@@ -222,11 +222,23 @@ def _replay_one(trade: dict, mint_tape: list[dict], signature_indices: dict[str,
     if any(int(event.get("cashback_bps") or 0) > 0 or int(event.get("cashback") or 0) > 0
            for event in [entry_event, *interval, exit_event]):
         return {"status": "unsupported_cashback_mode"}
-    if any(entry_slot <= slot <= exit_slot for slot in complete_slots):
+    if any(entry_decision_slot <= slot <= exit_slot for slot in complete_slots):
         return {"status": "curve_completed_before_exit"}
 
-    previous = entry_event
     max_error = 0.0
+    if fill_policy == "next_later_slot":
+        previous_pre_entry = entry_decision_event
+        for event in mint_tape[entry_decision_index + 1:entry_index + 1]:
+            check = validate_observed_transition(previous_pre_entry, event, max_formula_error)
+            if not check["ok"]:
+                return {
+                    "status": check["reason"] or "invalid_pre_entry_transition",
+                    "relative_error": check["relative_error"],
+                }
+            max_error = max(max_error, check["relative_error"] or 0.0)
+            previous_pre_entry = event
+
+    previous = entry_event
     for event in interval:
         check = validate_observed_transition(previous, event, max_formula_error)
         if not check["ok"]:
