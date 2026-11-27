@@ -15,12 +15,15 @@ def main():
                         help="SOL/USD reference used to convert the fixed USD stake into lamports")
     parser.add_argument("--stake-usd", type=float, default=1.0)
     parser.add_argument("--gas-usd", type=float, default=0.0285)
+    parser.add_argument("--tape-file", default="sniper_tape_sniper.jsonl",
+                        help="Tape JSONL filename inside --data-dir; use the block-ordered tape after reconstruction")
     parser.add_argument("--max-formula-error", type=float, default=1e-4)
     args = parser.parse_args()
     report = build_report(
         args.data_dir, args.out, sol_usd=args.sol_usd,
         stake_usd=args.stake_usd, gas_usd=args.gas_usd,
         max_formula_error=args.max_formula_error,
+        tape_filename=args.tape_file,
     )
     for lane, summary in report["lanes"].items():
         strict = report["next_later_slot_lanes"][lane]
