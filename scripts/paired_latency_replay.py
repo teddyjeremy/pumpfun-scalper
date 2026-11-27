@@ -114,6 +114,10 @@ def replay_lane(rows, *, latency_seconds, wallet_loss_guard, positive_entry_flow
             if (signature == candidate["signal_signature"] or slot <= candidate["signal_slot"]
                     or elapsed < latency_seconds):
                 continue
+            if len(candidate["signal_buyer_wallets"]) < 2:
+                pending.pop(mint, None)
+                decisions["rejected_single_buyer_signal"] += 1
+                continue
             if wallet_loss_guard and candidate["signal_wallet"] in locked_wallets:
                 pending.pop(mint, None)
                 decisions["rejected_locked_wallet"] += 1
@@ -155,9 +159,9 @@ def replay_lane(rows, *, latency_seconds, wallet_loss_guard, positive_entry_flow
             continue
 
         buyers = list(tx.get("buyer_wallets") or [])
-        if len(set(buyers)) < 2:
+        if len(set(buyers)) < 1:
             continue
-        signal_wallet = tx.get("first_buyer_wallet") or (buyers[0] if buyers else None)
+        signal_wallet = tx.get("first_buyer_wallet") or buyers[0]
         if wallet_loss_guard and signal_wallet in locked_wallets:
             decisions["rejected_locked_signal"] += 1
             continue
@@ -169,7 +173,7 @@ def replay_lane(rows, *, latency_seconds, wallet_loss_guard, positive_entry_flow
             "signal_net_buy_sol": float(tx.get("net_buy_sol") or 0),
             "signal_creator_sell": bool(tx.get("creator_sell")),
         }
-        decisions["qualified_multi_buyer_signal"] += 1
+        decisions["signal_candidate_observed"] += 1
 
     return {
         "latency_seconds": latency_seconds,
