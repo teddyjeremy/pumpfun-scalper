@@ -23,10 +23,14 @@ def main():
         max_formula_error=args.max_formula_error,
     )
     for lane, summary in report["lanes"].items():
+        strict = report["next_later_slot_lanes"][lane]
         print(
-            f"{lane}: replayed={summary['replayed_trades']}/{summary['trades_in_lane']} "
-            f"wins={summary['wins']} losses={summary['losses']} "
-            f"net={summary['curve_replay_net_pnl_usd']:.4f} USD"
+            f"{lane}: immediate={summary['replayed_trades']}/{summary['trades_in_lane']} "
+            f"W/L={summary['wins']}/{summary['losses']} "
+            f"net={summary['curve_replay_net_pnl_usd']:.4f} USD | "
+            f"next-slot={strict['replayed_trades']}/{strict['trades_in_lane']} "
+            f"W/L={strict['wins']}/{strict['losses']} "
+            f"net={strict['curve_replay_net_pnl_usd']:.4f} USD"
         )
 
 
