@@ -48,6 +48,9 @@ def main():
     v2_entries = read_jsonl(os.path.join(args.data_dir, "sniper_v2_entries_sniper.jsonl"))
     v2_trades = read_jsonl(os.path.join(args.data_dir, "sniper_v2_trades_sniper.jsonl"))
     v2_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_v2_decisions_sniper.jsonl"))
+    v3_entries = read_jsonl(os.path.join(args.data_dir, "sniper_v3_entries_sniper.jsonl"))
+    v3_trades = read_jsonl(os.path.join(args.data_dir, "sniper_v3_trades_sniper.jsonl"))
+    v3_decisions = read_jsonl(os.path.join(args.data_dir, "sniper_v3_decisions_sniper.jsonl"))
     wins = [x for x in trades if float(x.get("net_pnl_usd", 0)) > 0]
     losses = [x for x in trades if float(x.get("net_pnl_usd", 0)) <= 0]
     net = sum(float(x.get("net_pnl_usd", 0)) for x in trades)
@@ -112,6 +115,21 @@ def main():
         v2_equity += float(row.get("net_pnl_usd", 0))
         v2_peak = max(v2_peak, v2_equity)
         v2_max_drawdown = min(v2_max_drawdown, v2_equity - v2_peak)
+    v3_wins = [x for x in v3_trades if float(x.get("net_pnl_usd", 0)) > 0]
+    v3_losses = [x for x in v3_trades if float(x.get("net_pnl_usd", 0)) <= 0]
+    v3_net = sum(float(x.get("net_pnl_usd", 0)) for x in v3_trades)
+    v3_positive = sum(float(x.get("net_pnl_usd", 0)) for x in v3_trades if float(x.get("net_pnl_usd", 0)) > 0)
+    v3_negative = abs(sum(float(x.get("net_pnl_usd", 0)) for x in v3_trades if float(x.get("net_pnl_usd", 0)) < 0))
+    v3_exit_counts = Counter(x.get("exit_reason", "unknown") for x in v3_trades)
+    v3_decision_counts = Counter(x.get("decision", "unknown") for x in v3_decisions)
+    v3_ordered = sorted(v3_trades, key=lambda x: (int(x.get("exit_timestamp") or 0), int(x.get("exit_sequence") or 0)))
+    v3_equity = 0.0
+    v3_peak = 0.0
+    v3_max_drawdown = 0.0
+    for row in v3_ordered:
+        v3_equity += float(row.get("net_pnl_usd", 0))
+        v3_peak = max(v3_peak, v3_equity)
+        v3_max_drawdown = min(v3_max_drawdown, v3_equity - v3_peak)
     tape_sol_missing_price = sum(1 for x in tape if x.get("quote_mint") == "SOL" and not x.get("price_sol"))
     tx_multi_event_count = sum(1 for x in tx_summaries if int(x.get("event_count") or 0) > 1)
     tx_missing_final_price = sum(1 for x in tx_summaries if not x.get("final_price_sol"))
@@ -188,6 +206,17 @@ def main():
         "high_conviction_exit_reasons": dict(v2_exit_counts),
         "high_conviction_decisions": dict(v2_decision_counts),
         "high_conviction_unclosed_entries": max(0, len(v2_entries) - len(v2_trades)),
+        "high_conviction_v3_entries": len(v3_entries),
+        "high_conviction_v3_closed_trades": len(v3_trades),
+        "high_conviction_v3_wins": len(v3_wins),
+        "high_conviction_v3_losses": len(v3_losses),
+        "high_conviction_v3_win_rate": len(v3_wins) / len(v3_trades) if v3_trades else None,
+        "high_conviction_v3_net_pnl_usd": round(v3_net, 6),
+        "high_conviction_v3_profit_factor": round(v3_positive / v3_negative, 4) if v3_negative else None,
+        "high_conviction_v3_max_drawdown_usd": round(v3_max_drawdown, 6),
+        "high_conviction_v3_exit_reasons": dict(v3_exit_counts),
+        "high_conviction_v3_decisions": dict(v3_decision_counts),
+        "high_conviction_v3_unclosed_entries": max(0, len(v3_entries) - len(v3_trades)),
         "capture_quality": {
             "sol_tape_events_missing_price": tape_sol_missing_price,
             "transaction_multi_event_count": tx_multi_event_count,
@@ -226,6 +255,8 @@ def main():
             "Wallet-cohort results are descriptive within-session observations and do not establish wallet identity, coordination, or future performance.",
             "The high-conviction lane waits for a separate execution transaction after its confirmation transaction and uses conservative first/final price marks; it remains a paper fill proxy, not a guaranteed executable quote.",
             "The high-conviction confirmation thresholds are research hypotheses and require fresh out-of-sample validation; no profitability is established.",
+            "The v3 quality candidate is an isolated shadow lane using a 25% take-profit, maximum 10-second launch age at entry, and one entry per mint; it does not change v2 or the baseline.",
+            "V3 remains a paper simulation with the same conservative reserve marks, costs, and stale timer-quote limitations; it requires out-of-sample validation.",
         ],
     }
     with open(os.path.join(args.out, "sniper_report.json"), "w", encoding="utf-8") as f:
@@ -279,6 +310,18 @@ def main():
         f"- Exit reasons: **{summary['high_conviction_exit_reasons']}**",
         f"- Decisions: **{summary['high_conviction_decisions']}**",
         f"- Unclosed entries: **{summary['high_conviction_unclosed_entries']}**",
+        "", "## High-conviction quality candidate (v3 shadow only)",
+        "- Rules: same signal and confirmation filters as v2; execution must occur within 10 seconds of launch; one entry per mint; take-profit 25%; stop-loss 12%; maximum hold 30 seconds.",
+        "- V2 remains unchanged and runs beside v3 so both see the same transaction stream.",
+        f"- Entries / closed trades: **{summary['high_conviction_v3_entries']} / {summary['high_conviction_v3_closed_trades']}**",
+        f"- Wins / losses: **{summary['high_conviction_v3_wins']} / {summary['high_conviction_v3_losses']}**",
+        f"- Win rate: **{summary['high_conviction_v3_win_rate']:.1%}**" if summary["high_conviction_v3_win_rate"] is not None else "- Win rate: n/a",
+        f"- Net simulated P&L: **{summary['high_conviction_v3_net_pnl_usd']:.4f} USD**",
+        f"- Profit factor: **{summary['high_conviction_v3_profit_factor']:.2f}**" if summary["high_conviction_v3_profit_factor"] is not None else "- Profit factor: n/a",
+        f"- Exit-order max drawdown: **{summary['high_conviction_v3_max_drawdown_usd']:.4f} USD**",
+        f"- Exit reasons: **{summary['high_conviction_v3_exit_reasons']}**",
+        f"- Decisions: **{summary['high_conviction_v3_decisions']}**",
+        f"- Unclosed entries: **{summary['high_conviction_v3_unclosed_entries']}**",
         "", "## Independent shadow research",
         f"- Shadow entries: **{summary['independent_shadow_entries']}**",
         f"- Shadow closed trades: **{summary['independent_shadow_closed_trades']}**",
