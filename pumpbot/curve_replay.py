@@ -187,10 +187,8 @@ def _replay_one(trade: dict, mint_tape: list[dict], signature_indices: dict[str,
         return {"status": "unsupported_cashback_launch"}
 
     interval = mint_tape[entry_index + 1:exit_index + 1]
-    if entry_event.get("mayhem_mode") or exit_event.get("mayhem_mode") or any(
-        event.get("mayhem_mode") for event in interval
-    ):
-        return {"status": "unsupported_mayhem_mode"}
+    # Pump V3 supports Mayhem curves. Their special fee recipient does not
+    # change the curve quote math; completion is still excluded below.
     if any(int(event.get("cashback_bps") or 0) > 0 or int(event.get("cashback") or 0) > 0
            for event in [entry_event, *interval, exit_event]):
         return {"status": "unsupported_cashback_mode"}
