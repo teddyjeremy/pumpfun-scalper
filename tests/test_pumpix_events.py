@@ -62,7 +62,7 @@ def _trade_event(quote_mint=None, vsol=40 * 10 ** 9, qamt=0, vq=0):
     b += bytes(32); b += struct.pack("<QQ", 30, 1)
     b += b"\x00" + struct.pack("<QQQq", 0, 0, 0, 0)
     name = b"buy_exact_quote_in_v3"; b += struct.pack("<I", len(name)) + name
-    b += b"\x00" + struct.pack("<QQQQ", 0, 0, 0, 0) + struct.pack("<I", 0)
+    b += b"\x01" + struct.pack("<QQQQ", 30, 3, 20, 2) + struct.pack("<I", 0)
     b += bytes(Pubkey.from_string(quote_mint)) if quote_mint else bytes(32)
     b += struct.pack("<QQQ", qamt, vq, 0) + struct.pack("<QQQ", 0, 0, 0) + bytes(8)
     return bytes(b)
