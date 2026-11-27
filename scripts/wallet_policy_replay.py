@@ -114,7 +114,9 @@ def replay(rows, delay, policy_name, loss_limit, cooldown, flow_gate=False,
                 "entry_fill":px*(1+entry_slip),
                 "entry_vsol_raw":tx.get("final_virtual_sol_reserves_raw"),
                 "entry_vtoken_raw":tx.get("final_virtual_token_reserves_raw"),
-                "last_sig":sig,"last_slot":slot,"last_time":now,"last_px":px}
+                "last_sig":sig,"last_slot":slot,"last_time":now,"last_px":px,
+                "last_vsol_raw":tx.get("final_virtual_sol_reserves_raw"),
+                "last_vtoken_raw":tx.get("final_virtual_token_reserves_raw")}
             pending.pop(mint); entries.append(entry); position=entry
             decisions["entry"] += 1
             continue
