@@ -44,7 +44,7 @@ def _pct(values: list[float], percentile: float) -> float | None:
 
 def _mark_at_or_after(events: list[dict], start_index: int, end_index: int,
                       min_slot: int) -> dict | None:
-    for event in events[start_index:end_index + 1]:
+    for event in events[start_index:end_index]:
         if int(event.get("slot") or 0) >= min_slot:
             return event
     return None
