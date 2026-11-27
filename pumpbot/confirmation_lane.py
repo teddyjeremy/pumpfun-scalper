@@ -41,6 +41,9 @@ class HighConvictionConfirmationLane:
         exit_slippage: float, fee_rate: float, gas_usd: float,
         min_confirmation_buyers: int = 2, min_confirmation_buy_sol: float = 0.5,
         min_confirmation_move: float = 0.05,
+        event_prefix: str = "sniper_v2",
+        max_entry_age_seconds: int | None = None,
+        one_entry_per_mint: bool = False,
     ):
         self.j = journal
         self.stake_usd = stake_usd
@@ -55,8 +58,15 @@ class HighConvictionConfirmationLane:
         self.min_confirmation_buyers = min_confirmation_buyers
         self.min_confirmation_buy_sol = min_confirmation_buy_sol
         self.min_confirmation_move = min_confirmation_move
+        self.event_prefix = event_prefix
+        self.max_entry_age_seconds = max_entry_age_seconds
+        self.one_entry_per_mint = one_entry_per_mint
+        self.used_mints: set[str] = set()
         self.pending: dict[str, dict] = {}
         self.position: dict | None = None
+
+    def _kind(self, suffix: str) -> str:
+        return f"{self.event_prefix}_{suffix}"
 
     def process(self, tx: dict):
         mint = tx["mint"]
@@ -70,7 +80,7 @@ class HighConvictionConfirmationLane:
                 return
             price = _sell_mark(tx)
             if not price:
-                self.j.write("sniper_v2_decisions", {
+                self.j.write(self._kind("decisions"), {
                     "mint": mint, "signature": signature,
                     "decision": "ignored_exit_missing_price",
                 })
@@ -98,7 +108,7 @@ class HighConvictionConfirmationLane:
                 return
             if delay < 0 or delay > self.confirm_seconds:
                 self.pending.pop(mint, None)
-                self.j.write("sniper_v2_decisions", {
+                self.j.write(self._kind("decisions"), {
                     "mint": mint, "signature": signature,
                     "decision": "expired_confirmation_window", "delay_seconds": delay,
                 })
@@ -122,7 +132,7 @@ class HighConvictionConfirmationLane:
                 failures.append("confirmation_momentum_too_weak")
             if failures:
                 self.pending.pop(mint, None)
-                self.j.write("sniper_v2_decisions", {
+                self.j.write(self._kind("decisions"), {
                     "mint": mint, "signature": signature,
                     "decision": "rejected_confirmation_quality",
                     "reasons": failures, "buyer_count": int(tx.get("buyer_count") or 0),
@@ -143,7 +153,7 @@ class HighConvictionConfirmationLane:
                 "confirmation_net_buy_sol": float(tx.get("net_buy_sol") or 0),
                 "confirmation_intra_transaction_price_move": move,
             })
-            self.j.write("sniper_v2_decisions", {
+            self.j.write(self._kind("decisions"), {
                 "mint": mint, "signature": signature,
                 "decision": "confirmation_passed_waiting_for_later_execution",
                 "buyer_count": pending["confirmation_buyer_count"],
@@ -160,7 +170,7 @@ class HighConvictionConfirmationLane:
                 return
             if delay < 0 or delay > self.confirm_seconds:
                 self.pending.pop(mint, None)
-                self.j.write("sniper_v2_decisions", {
+                self.j.write(self._kind("decisions"), {
                     "mint": mint, "signature": signature,
                     "decision": "expired_execution_window", "delay_seconds": delay,
                 })
@@ -172,7 +182,7 @@ class HighConvictionConfirmationLane:
                 or tx.get("creator_sell")
             ):
                 self.pending.pop(mint, None)
-                self.j.write("sniper_v2_decisions", {
+                self.j.write(self._kind("decisions"), {
                     "mint": mint, "signature": signature,
                     "decision": "rejected_execution_flow",
                     "buyer_count": int(tx.get("buyer_count") or 0),
@@ -180,9 +190,28 @@ class HighConvictionConfirmationLane:
                     "creator_sell": bool(tx.get("creator_sell")),
                 })
                 return
+            entry_age = tx.get("t_plus")
+            if self.max_entry_age_seconds is not None and (
+                entry_age is None or int(entry_age) > self.max_entry_age_seconds
+            ):
+                self.pending.pop(mint, None)
+                self.j.write(self._kind("decisions"), {
+                    "mint": mint, "signature": signature,
+                    "decision": "rejected_entry_age",
+                    "entry_t_plus": entry_age,
+                    "max_entry_age_seconds": self.max_entry_age_seconds,
+                })
+                return
+            if self.one_entry_per_mint and mint in self.used_mints:
+                self.pending.pop(mint, None)
+                self.j.write(self._kind("decisions"), {
+                    "mint": mint, "signature": signature,
+                    "decision": "rejected_mint_already_traded",
+                })
+                return
             if self.position is not None:
                 self.pending.pop(mint, None)
-                self.j.write("sniper_v2_decisions", {
+                self.j.write(self._kind("decisions"), {
                     "mint": mint, "signature": signature,
                     "decision": "rejected_portfolio_busy",
                     "occupied_mint": self.position["mint"],
@@ -192,7 +221,7 @@ class HighConvictionConfirmationLane:
             price = _buy_mark(tx)
             if not price:
                 self.pending.pop(mint, None)
-                self.j.write("sniper_v2_decisions", {
+                self.j.write(self._kind("decisions"), {
                     "mint": mint, "signature": signature,
                     "decision": "rejected_execution_missing_price",
                 })
@@ -236,8 +265,9 @@ class HighConvictionConfirmationLane:
             }
             self.pending.pop(mint, None)
             self.position = entry
-            self.j.write("sniper_v2_entries", entry)
-            self.j.write("sniper_v2_decisions", {
+            self.used_mints.add(mint)
+            self.j.write(self._kind("entries"), entry)
+            self.j.write(self._kind("decisions"), {
                 "mint": mint, "signature": signature,
                 "decision": "accepted_high_conviction_entry",
                 "signal_signature": entry["signal_signature"],
@@ -252,7 +282,7 @@ class HighConvictionConfirmationLane:
         if int(tx.get("buyer_count") or 0) < 2:
             return
         if float(tx.get("net_buy_sol") or 0) <= 0 or tx.get("creator_sell"):
-            self.j.write("sniper_v2_decisions", {
+            self.j.write(self._kind("decisions"), {
                 "mint": mint, "signature": signature,
                 "decision": "rejected_signal_flow",
                 "buyer_count": int(tx.get("buyer_count") or 0),
@@ -271,7 +301,7 @@ class HighConvictionConfirmationLane:
             "signal_buy_sol": float(tx.get("buy_sol") or 0),
             "signal_net_buy_sol": float(tx.get("net_buy_sol") or 0),
         }
-        self.j.write("sniper_v2_decisions", {
+        self.j.write(self._kind("decisions"), {
             "mint": mint, "signature": signature,
             "decision": "multi_buyer_signal_waiting_for_confirmation",
             "buyer_count": int(tx.get("buyer_count") or 0),
@@ -286,7 +316,7 @@ class HighConvictionConfirmationLane:
         exit_fill = price * (1.0 - self.exit_slippage)
         net_mult = (exit_fill / p["entry_fill_price_sol"]) * ((1.0 - self.fee_rate) ** 2)
         net_pnl = p["stake_usd"] * (net_mult - 1.0) - self.gas_usd
-        self.j.write("sniper_v2_trades", {
+        self.j.write(self._kind("trades"), {
             **p, "exit_price_sol": price, "exit_fill_price_sol": exit_fill,
             "exit_timestamp": timestamp, "exit_t_plus": t_plus,
             "exit_signature": signature, "exit_sequence": sequence,
@@ -303,7 +333,7 @@ class HighConvictionConfirmationLane:
             start = pending["signal_timestamp"] if pending["stage"] == "signal" else pending["confirmation_timestamp"]
             if now - start > self.confirm_seconds:
                 self.pending.pop(mint, None)
-                self.j.write("sniper_v2_decisions", {
+                self.j.write(self._kind("decisions"), {
                     "mint": mint,
                     "decision": "expired_confirmation_timer" if pending["stage"] == "signal" else "expired_execution_timer",
                     "delay_seconds": int(now - start),
