@@ -13,6 +13,7 @@ from .journal import Journal
 from .transaction_intel import TransactionAwareLane, build_transaction_summaries
 from .confirmation_lane import HighConvictionConfirmationLane
 from .cluster_wallet_guard import ClusterPortfolioWalletGuard
+from .latency_research import LatencyAwareWalletGuard
 
 DISCOVERY_SECONDS = int(os.environ.get("SNIPER_DISCOVERY_SECONDS", "3600"))
 TAIL_SECONDS = int(os.environ.get("SNIPER_TAIL_SECONDS", "600"))
@@ -83,6 +84,17 @@ class Sniper:
             entry_slippage=ENTRY_SLIPPAGE, exit_slippage=EXIT_SLIPPAGE,
             fee_rate=FEE_RATE, gas_usd=ROUND_TRIP_GAS_USD,
         )
+        # Three isolated latency-aware wallet-guard variants. Existing lanes are untouched.
+        self.latency_lanes = [
+            LatencyAwareWalletGuard(
+                self.j, latency_seconds=delay, stake_usd=STAKE_USD,
+                take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS,
+                max_hold_seconds=MAX_HOLD_SECONDS, confirm_seconds=ENTRY_CONFIRM_SECONDS,
+                entry_slippage=ENTRY_SLIPPAGE, exit_slippage=EXIT_SLIPPAGE,
+                fee_rate=FEE_RATE, gas_usd=ROUND_TRIP_GAS_USD,
+            )
+            for delay in (0.5, 1.0, 1.5)
+        ]
         # Isolated lane: all signals, fills and marks use transaction-complete snapshots.
         self.tx_lane = TransactionAwareLane(
             self.j, stake_usd=STAKE_USD, take_profit=TAKE_PROFIT, stop_loss=STOP_LOSS,
@@ -198,6 +210,8 @@ class Sniper:
             self.tx_lane.process(tx_summary)
             self.v2_lane.process(tx_summary)
             self.v3_lane.process(tx_summary)
+            for lane in self.latency_lanes:
+                lane.process(tx_summary)
 
     def _trade_launch(self, c: Launch, ev: dict, signature: str, price: float, t: int):
         side_buy = bool(ev.get("is_buy"))
@@ -600,6 +614,8 @@ class Sniper:
                 stale = max(0, int(now - p.get("last_price_timestamp", now)))
                 self._close_cluster_portfolio(p["last_price_sol"], int(now), 0, "timer", "time_cap_timer", stale)
         self.cluster_wallet_guard.timer_tick(now)
+        for lane in self.latency_lanes:
+            lane.timer_tick(now)
         for mint, pending in list(self.cluster_pending.items()):
             if now - pending["signal_timestamp"] > ENTRY_CONFIRM_SECONDS:
                 self.cluster_pending.pop(mint, None)
@@ -683,6 +699,12 @@ class Sniper:
                 "cluster_portfolio_position_at_shutdown": self.cluster_portfolio_position,
                 "cluster_wallet_guard_position_at_shutdown": self.cluster_wallet_guard.position,
                 "cluster_wallet_guard_locked_wallet_count": len(self.cluster_wallet_guard.locked_wallets),
+                "latency_lane_positions_at_shutdown": {
+                    lane.prefix: lane.position for lane in self.latency_lanes
+                },
+                "latency_lane_locked_wallet_counts": {
+                    lane.prefix: len(lane.locked_wallets) for lane in self.latency_lanes
+                },
                 "transaction_lane_position_at_shutdown": self.tx_lane.position,
                 "transaction_lane_pending_count_at_shutdown": len(self.tx_lane.pending),
                 "high_conviction_position_at_shutdown": self.v2_lane.position,

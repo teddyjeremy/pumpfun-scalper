@@ -35,6 +35,7 @@ def build_transaction_summaries(events, launches: dict, signature: str, slot: in
         buy_sol = sell_sol = buy_tokens = sell_tokens = 0.0
         creator_buy = creator_sell = False
         wallet_buy_sol = defaultdict(float)
+        first_buyer_wallet = None
         first_price = final_price = 0.0
         first_virtual_sol = final_virtual_sol = 0
         first_virtual_token = final_virtual_token = 0
@@ -46,6 +47,8 @@ def build_transaction_summaries(events, launches: dict, signature: str, slot: in
             if is_buy:
                 if trader and trader != launch.creator:
                     buyers.add(trader)
+                    if first_buyer_wallet is None:
+                        first_buyer_wallet = trader
                     wallet_buy_sol[trader] += amount_sol
                 buy_sol += amount_sol
                 buy_tokens += amount_tokens
@@ -71,7 +74,7 @@ def build_transaction_summaries(events, launches: dict, signature: str, slot: in
             "mint": mint, "symbol": launch.symbol, "creator": launch.creator,
             "signature": signature, "slot": int(slot or 0), "timestamp": timestamp,
             "t_plus": t_plus, "event_count": len(rows),
-            "buyer_wallets": sorted(buyers), "seller_wallets": sorted(sellers),
+            "buyer_wallets": sorted(buyers), "first_buyer_wallet": first_buyer_wallet, "seller_wallets": sorted(sellers),
             "buyer_count": len(buyers), "seller_count": len(sellers),
             "buy_count": sum(bool(x.get("is_buy")) for x in rows),
             "sell_count": sum(not bool(x.get("is_buy")) for x in rows),

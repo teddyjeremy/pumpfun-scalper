@@ -91,6 +91,10 @@ jobs:
         if: always()
         run: python -m pumpbot.execution_filter_replay --data-dir ./data --out ./report
 
+      - name: Build latency-aware research report
+        if: always()
+        run: python scripts/latency_research_report.py --data-dir ./data --out ./report
+
       - name: Upload sniper observation
         if: always()
         uses: actions/upload-artifact@v4
