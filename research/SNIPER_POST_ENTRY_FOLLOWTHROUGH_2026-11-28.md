@@ -93,7 +93,23 @@ The 3-second curve P&L and net SOL flow are strongly associated with the eventua
 
 **This is not an out-of-sample prediction result.** The sample is only 26 records, groups are defined by eventual exit outcome, and the same underlying transaction flow drives several of these variables. The correlation is useful for deciding what to investigate, not for selecting a cutoff.
 
-## 7. Critical counterexample: early red does not always mean a bad trade
+## 7. Full event-by-event executable curve path
+
+I extended the checkpoint analysis by replaying the exact integer Pump curve state after every complete external transaction between the paired entry fill and selected exit fill. Events within one Solana signature were applied as one atomic transaction before taking a quote. The final calculated P&L matched the PR35 curve replay for all 26 records exactly (maximum absolute difference **$0.000000**).
+
+| Outcome | Trades with any positive executable quote | Median share of transaction checkpoints positive | Median longest consecutive positive transaction run | Median best quote on path |
+|---|---:|---:|---:|---:|
+| Take profit | 10/10 | 64.5% | 11 transactions | +$0.2399 |
+| Stop loss | 0/4 | 0% | 0 | -$0.0451 |
+| Time cap | 1/12 | 0% | 0 | -$0.0335 |
+
+Eleven of the twelve time-cap paths never became positive at any observed transaction checkpoint, including the delayed selected exit fill. The one exception was VOW: 20 of its 26 transaction checkpoints were positive and its best quote was +$0.0919. The best path among the other eleven time-cap trades was still negative at approximately -$0.0051.
+
+All four stop-loss paths remained negative throughout their observed entry-to-exit paths. All ten take-profit paths reached positive executable quote territory, although some experienced substantial negative excursions first.
+
+This event-by-event result is stronger than checking only the 3-second checkpoint, but it is still a small outcome-selected sample. It does not mean the bot could know the future exit category from the early path.
+
+## 8. Critical counterexample: early red does not always mean a bad trade
 
 Two of the ten eventual take-profit trades were still below executable breakeven at three seconds.
 
@@ -105,7 +121,7 @@ Therefore:
 - A negative quote at three seconds is not enough evidence to reject a position.
 - We need to study duration and persistence of recovery, not one checkpoint.
 
-## 8. Current interpretation
+## 9. Current interpretation
 
 The evidence supports three descriptive path types:
 
@@ -115,7 +131,7 @@ The evidence supports three descriptive path types:
 
 The entry gate currently distinguishes positive-flow transactions from non-positive-flow transactions. It does not measure whether the market has enough post-entry demand to pay for the curve impact and costs.
 
-## 9. Next tests — no threshold chosen yet
+## 10. Next tests — no threshold chosen yet
 
 Use the already captured Run 15 and Run 16 tapes to deepen the measurement before collecting a new sample.
 
@@ -127,6 +143,6 @@ Use the already captured Run 15 and Run 16 tapes to deepen the measurement befor
 6. **Session robustness:** report Run 15 and Run 16 separately, then use a fresh observation as a locked out-of-sample validation.
 7. **No optimization yet:** do not select a 1s/2s/3s threshold from these 26 records. First establish whether a stable persistence/acceleration feature exists across sessions.
 
-## 10. Decision
+## 11. Decision
 
 **No strategy rule changes.** The next research focus is post-entry demand persistence and curve efficiency. The flow gate remains a research candidate, not a production rule. All results remain paper-only and counterfactual.
