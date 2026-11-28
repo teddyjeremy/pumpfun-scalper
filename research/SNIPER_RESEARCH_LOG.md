@@ -308,6 +308,8 @@ Run 16 multi-buyer wallet-guard lane: 24 trades, 19W/5L, +$4.262707 in the origi
 
 ## 6. Early post-entry path research (Runs 15–16)
 
+Detailed follow-through report: [Run 15 / Run 16 post-entry analysis](SNIPER_POST_ENTRY_FOLLOWTHROUGH_2026-11-28.md). This includes checkpoint P&L, per-transaction exact curve quotes, persistence statistics and the delayed-winner counterexample.
+
 A diagnostic CSV was generated for the flow-gated wallet-lock lane at 0.5s, 1.0s and 1.5s. It contains 68 lane records across the two sessions; these overlap across delays. The primary summary below uses the 500ms lane only.
 
 **500ms lane, Run 15 + Run 16: 26 trade records**
@@ -449,6 +451,8 @@ Do not conflate:
 3. Keep observed price extrema separate from executable curve quote P&L.
 
 ### Phase B — investigate post-entry follow-through (next research priority)
+The first comparison and event-by-event exact curve quote reconstruction are complete for the 500ms flow-gated lane. Final per-trade quotes match PR35 exactly. The next analysis is to calculate positive/negative quote persistence and flow acceleration from the same raw tapes, with trigger-to-fill periods separated from pre-trigger paths. Do not repeat the already completed horizon checkpoint or simple buyer-count/flow sweeps.
+
 Use Run 15 and Run 16 tapes, not a fresh threshold sweep. Compare all flow-gated entries, including take-profit, stop-loss and time-cap outcomes, with unique mint/signature pairing and lane overlap controlled.
 
 Measure:
