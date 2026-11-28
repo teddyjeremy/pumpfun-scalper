@@ -1,0 +1,117 @@
+name: Reprocess sniper paper observation artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "GitHub Actions run ID containing the captured sniper artifact"
+        required: true
+        default: "46055823769"
+        type: string
+      artifact_name:
+        description: "Exact artifact name from the source observation"
+        required: true
+        default: "pumpfun-launch-sniper-15"
+        type: string
+      sol_usd:
+        description: "SOL/USD reference used to convert the fixed USD stake into lamports"
+        required: true
+        default: "71.69"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: sniper-artifact-reprocess-${{ inputs.source_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  reprocess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout current replay and reconstruction code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate inputs and Helius secret
+        shell: bash
+        run: |
+          if ! [[ "${SOURCE_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "::error::source_run_id must be a numeric GitHub Actions run ID."
+            exit 1
+          fi
+          if ! [[ "${SOL_USD}" =~ ^[0-9]+([.][0-9]+)?$ ]] || ! awk -v value="${SOL_USD}" "BEGIN { exit !(value > 0) }"; then
+            echo "::error::sol_usd must be a positive number."
+            exit 1
+          fi
+          if [ -z "$HELIUS_API_KEY" ]; then
+            echo "::error::Add HELIUS_API_KEY in repository Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOL_USD: ${{ inputs.sol_usd }}
+
+      - name: Download the original observation artifact
+        uses: actions/download-artifact@v4
+        with:
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          name: ${{ inputs.artifact_name }}
+          path: ./source
+
+      - name: Verify captured observation files
+        shell: bash
+        run: |
+          test -s ./source/data/sniper_tape_sniper.jsonl
+          test -s ./source/data/sniper_launches_sniper.jsonl
+          test -s ./source/data/sniper_latency_0500ms_trades_sniper.jsonl
+          test -s ./source/data/sniper_latency_1000ms_trades_sniper.jsonl
+          test -s ./source/data/sniper_latency_1500ms_trades_sniper.jsonl
+          mkdir -p ./source/report
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies and verify replay code
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pytest -q
+          python -m compileall -q pumpbot scripts
+
+      - name: Reconstruct canonical transaction order
+        run: python -m scripts.sniper_slot_order_reconstruction --data-dir ./source/data --out ./source/report
+
+      - name: Replay latency lanes against the canonical tape
+        env:
+          SOL_USD: ${{ inputs.sol_usd }}
+        run: |
+          python scripts/sniper_curve_execution_replay.py \
+            --data-dir ./source/data \
+            --out ./source/report \
+            --sol-usd "${SOL_USD}" \
+            --tape-file sniper_tape_block_ordered_sniper.jsonl
+
+      - name: Upload reprocessed observation and replay reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniper-reprocessed-source-${{ inputs.source_run_id }}
+          path: |
+            source/data/
+            source/report/
+          if-no-files-found: warn
+          retention-days: 14
