@@ -27,7 +27,9 @@ These are trade records, not 26 guaranteed unique mints. A mint can appear more 
 
 The initial executable curve mark after entry was approximately **-$0.0532** per $1 position under the replay's fee and gas assumptions. This entry deficit is why merely observing positive net flow is not enough.
 
-## 3. Early executable curve P&L
+## 3. Checkpoints along the selected entry-to-fill path
+
+Important timing qualification: the 1s/3s/5s/10s/15s checkpoint series follows the path through the selected delayed exit fill. It is **not** guaranteed to be entirely before the original exit trigger. The exact trigger timing below shows why this distinction matters.
 
 | Checkpoint | TP positive | SL positive | Time-cap positive |
 |---|---:|---:|---:|
@@ -46,11 +48,9 @@ Median executable curve P&L at key early checkpoints:
 | Stop loss (n=4) | -$0.1122 | -$0.1683 | -$0.1966 | -$0.1966 | -$0.1966 |
 | Time cap (n=12) | -$0.0465 | -$0.0472 | -$0.0453 | -$0.0442 | -$0.0447 |
 
-The take-profit cohort's median curve quote moves from below zero at one second to positive by two to three seconds. The time-cap cohort remains close to the initial entry deficit. Stop-loss trades deteriorate more severely.
+The checkpoint values are useful for describing the full path, but must not be read as a predictive early-entry comparison. Eight of ten take-profit triggers and all four stop-loss triggers occurred at or before three seconds after entry. Therefore, many of the 3-second and later take-profit/stop-loss checkpoints include transactions observed after the exit decision was already made.
 
-These are outcome-group descriptions. They do not show that the exit outcome could have been known at entry.
-
-## 4. Flow and participation in the first three seconds
+## 4. Flow and participation over the first three seconds of the selected path
 
 | Outcome | Median net SOL flow | Median buys | Median sells | Median distinct traders |
 |---|---:|---:|---:|---:|
@@ -60,7 +60,7 @@ These are outcome-group descriptions. They do not show that the exit outcome cou
 
 The time-cap cohort's net flow is positive at the median, but very small compared with the take-profit cohort. This is an important result: the gate's Boolean condition (at least one buy, positive net SOL flow, no creator sell) can pass even when the magnitude and breadth of subsequent buying are weak.
 
-The time-cap group also does not show high median sell counts in this 3-second window. Its problem is better described as weak follow-through / low participation than as an immediate sell avalanche.
+The time-cap group also does not show high median sell counts in this 3-second window. Its problem is better described as weak follow-through / low participation than as an immediate sell avalanche. However, the TP and SL group flow figures include post-trigger activity for many trades, so they are not a fair entry-time comparison. The time-cap trades were still pre-trigger during this early window.
 
 ## 5. Session split: why pooling is dangerous
 
@@ -89,9 +89,23 @@ Across the 26 records, Spearman rank correlations with final curve-path P&L were
 | Distinct traders at 3s | 0.409 |
 | Sell count at 3s | 0.026 |
 
-The 3-second curve P&L and net SOL flow are strongly associated with the eventual result in this small sample. Buy count and distinct trader count show weaker associations. Sell count alone has almost no rank association here.
+The rank associations are descriptive only. The sample is 26 records, groups are defined by eventual exit outcome, and the same underlying transaction flow drives several of these variables. More importantly, the 3-second checkpoint may occur after the exit trigger: eight of ten TP and all four SL triggers were already reached by then. These correlations are therefore **not valid evidence of an entry-time predictor** and must not be used to select a cutoff.
 
-**This is not an out-of-sample prediction result.** The sample is only 26 records, groups are defined by eventual exit outcome, and the same underlying transaction flow drives several of these variables. The correlation is useful for deciding what to investigate, not for selecting a cutoff.
+## 7. Exact curve P&L at the original exit trigger
+
+I split every path at the exact paired `exit_trigger_signature`, rather than treating the delayed exit-fill signature as the decision point. The trigger quote is calculated after applying the full trigger transaction to the counterfactual curve. The delayed exit quote is then measured separately.
+
+| Exit outcome | n | Median executable P&L at trigger | Positive at trigger | Median final P&L at delayed fill | Median trigger-to-fill wait |
+|---|---:|---:|---:|---:|---:|
+| Take profit | 10 | +$0.1788 | 10/10 | +$0.2254 | 1s |
+| Stop loss | 4 | -$0.1910 | 0/4 | -$0.1966 | 0.5s |
+| Time cap | 12 | -$0.0398 | 1/12 | -$0.0375 | 6.5s |
+
+The time-cap trigger-to-fill wait reached 33 seconds in one trade (integer block timestamps; coarse resolution). TP waits were at most one second in this sample; stop-loss waits were at most one second.
+
+The best executable quote **before the trigger** was positive in 10/10 TP trades, 0/4 SL trades, and only 1/12 time-cap trades. The median best pre-trigger quote was +$0.1788 for TP, -$0.0509 for SL, and -$0.0338 for time cap. Eleven of twelve time-cap paths never recovered to executable breakeven before the trigger. VOW was the sole positive time-cap exception, reaching about +$0.0764 before its trigger.
+
+This trigger-aligned view is the valid way to separate the market decision from the execution wait. It confirms that the timer cohort was generally already underwater when the timer fired; the later fill delay was usually a secondary factor.
 
 ## 7. Full event-by-event executable curve path
 
@@ -109,7 +123,7 @@ All four stop-loss paths remained negative throughout their observed entry-to-ex
 
 This event-by-event result is stronger than checking only the 3-second checkpoint, but it is still a small outcome-selected sample. It does not mean the bot could know the future exit category from the early path.
 
-## 8. Critical counterexample: early red does not always mean a bad trade
+## 9. Critical counterexample: early red does not always mean a bad trade
 
 Two of the ten eventual take-profit trades were still below executable breakeven at three seconds.
 
@@ -121,7 +135,7 @@ Therefore:
 - A negative quote at three seconds is not enough evidence to reject a position.
 - We need to study duration and persistence of recovery, not one checkpoint.
 
-## 9. Current interpretation
+## 10. Current interpretation
 
 The evidence supports three descriptive path types:
 
@@ -131,7 +145,7 @@ The evidence supports three descriptive path types:
 
 The entry gate currently distinguishes positive-flow transactions from non-positive-flow transactions. It does not measure whether the market has enough post-entry demand to pay for the curve impact and costs.
 
-## 10. Next tests — no threshold chosen yet
+## 11. Next tests — no threshold chosen yet
 
 Use the already captured Run 15 and Run 16 tapes to deepen the measurement before collecting a new sample.
 
@@ -143,6 +157,6 @@ Use the already captured Run 15 and Run 16 tapes to deepen the measurement befor
 6. **Session robustness:** report Run 15 and Run 16 separately, then use a fresh observation as a locked out-of-sample validation.
 7. **No optimization yet:** do not select a 1s/2s/3s threshold from these 26 records. First establish whether a stable persistence/acceleration feature exists across sessions.
 
-## 11. Decision
+## 12. Decision
 
 **No strategy rule changes.** The next research focus is post-entry demand persistence and curve efficiency. The flow gate remains a research candidate, not a production rule. All results remain paper-only and counterfactual.
