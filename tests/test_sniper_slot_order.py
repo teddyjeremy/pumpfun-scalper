@@ -114,3 +114,29 @@ def test_rows_from_block_keeps_transaction_and_inner_event_order():
     assert all(row["signature"] == "signature-1" for row in rows)
     assert rows[0]["t_plus"] == 10
     assert summary["decoded_target_trade_events"] == 2
+
+
+
+def test_fetch_confirmed_block_advertises_versioned_transaction_support():
+    from pumpbot.slot_order import fetch_confirmed_block
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"jsonrpc":"2.0","id":123,"result":{"transactions":[]}}'
+
+    def opener(request, timeout):
+        payload = json.loads(request.data.decode("utf-8"))
+        assert timeout == 40
+        assert payload["method"] == "getBlock"
+        assert payload["params"][1]["maxSupportedTransactionVersion"] == 1
+        return Response()
+
+    result = fetch_confirmed_block(123, "test-key", delay_seconds=0, opener=opener)
+
+    assert result == {"transactions": []}
