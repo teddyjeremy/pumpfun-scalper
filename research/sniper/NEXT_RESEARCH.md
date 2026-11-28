@@ -107,6 +107,21 @@ For any candidate:
 7. Document both positive and negative outcomes.
 8. Do not change rules mid-observation.
 
+## Immediate diagnostic command
+
+The new transaction-boundary diagnostic is implemented separately in PR #38. Once that PR is merged, reprocessing an observation artifact will generate the path diagnostics automatically. For a locally reprocessed artifact, run:
+
+```bash
+python -m scripts.sniper_curve_path_diagnostics \
+  --data-dir ./source/data \
+  --curve-report ./source/report/paired_latency_curve_replay.json \
+  --out ./source/report \
+  --tape-file sniper_tape_block_ordered_sniper.jsonl \
+  --lane-suffix wallet_lock_flow_gate
+```
+
+Use the 500ms lane as the primary descriptive sample and inspect 1.0s/1.5s only as paired sensitivity variants. Do not pool lane rows to increase the apparent sample size.
+
 ## Deliverables for the next research pass
 
 - `early_continuation_paths.csv`: one row per unique mint/trade path and lane identifier.
