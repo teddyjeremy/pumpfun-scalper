@@ -123,6 +123,13 @@ jobs:
             --sol-usd "${SOL_USD}" \
             --tape-file sniper_tape_block_ordered_sniper.jsonl
 
+      - name: Report paired time-cap transaction price paths
+        run: |
+          python -m scripts.sniper_timecap_path_diagnostics \
+            --data-dir ./source/data \
+            --out ./source/report \
+            --paired-file ./source/report/paired_latency_curve_replay.json
+
       - name: Report decision-to-fill execution decay
         run: |
           python -m scripts.sniper_signal_fill_diagnostics \
