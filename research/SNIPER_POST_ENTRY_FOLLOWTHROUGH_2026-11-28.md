@@ -123,7 +123,7 @@ All four stop-loss paths remained negative throughout their observed entry-to-ex
 
 This event-by-event result is stronger than checking only the 3-second checkpoint, but it is still a small outcome-selected sample. It does not mean the bot could know the future exit category from the early path.
 
-## 9. Critical counterexample: early red does not always mean a bad trade
+## 10. Critical counterexample: early red does not always mean a bad trade
 
 Two of the ten eventual take-profit trades were still below executable breakeven at three seconds.
 
@@ -138,7 +138,7 @@ Therefore:
 - A negative quote at three seconds is not enough evidence to reject a position.
 - We need to study duration and persistence of recovery, not one checkpoint.
 
-## 10. Current interpretation
+## 11. Current interpretation
 
 The evidence supports three descriptive path types:
 
@@ -148,7 +148,7 @@ The evidence supports three descriptive path types:
 
 The entry gate currently distinguishes positive-flow transactions from non-positive-flow transactions. It does not measure whether the market has enough post-entry demand to pay for the curve impact and costs.
 
-## 11. Next tests — no threshold chosen yet
+## 12. Next tests — no threshold chosen yet
 
 Use the already captured Run 15 and Run 16 tapes to deepen the measurement before collecting a new sample.
 
@@ -161,6 +161,6 @@ Use the already captured Run 15 and Run 16 tapes to deepen the measurement befor
 7. **Session robustness:** report Run 15 and Run 16 separately, then use a fresh observation as a locked out-of-sample validation.
 8. **No optimization yet:** do not select a 1s/2s/3s threshold from these 26 records. First establish whether a stable persistence/acceleration feature exists across sessions.
 
-## 12. Decision
+## 13. Decision
 
 **No strategy rule changes.** The next research focus is post-entry demand persistence and curve efficiency. The flow gate remains a research candidate, not a production rule. All results remain paper-only and counterfactual.
