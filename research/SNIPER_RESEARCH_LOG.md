@@ -327,6 +327,25 @@ The immediate executable quote after entry was approximately -$0.0532 for each t
 
 **Caution:** these are small groups (especially four stop-loss trades), selected by eventual exit outcome. The table is descriptive, not a causal or validated predictive filter. Do not use these medians as thresholds.
 
+### Additional first-30-second follow-through findings (500ms flow-gated lane)
+
+Using the 26 trade records in the 500ms wallet-lock + flow-gate lane across Runs 15 and 16:
+
+| Horizon | Take-profit quotes positive | Stop-loss quotes positive | Time-cap quotes positive |
+|---|---:|---:|---:|
+| 1s | 3/10 | 0/4 | 1/12 |
+| 2s | 7/10 | 0/4 | 1/12 |
+| 3s | 8/10 | 0/4 | 1/12 |
+| 5s | 8/10 | 0/4 | 1/12 |
+| 15s | 9/10 | 0/4 | 1/12 |
+| 30s | 10/10 | 0/4 | 1/12 |
+
+For these same 26 records, Spearman correlation with final curve-replay P&L was approximately 0.76 for 3-second executable P&L and 0.76 for 3-second net SOL flow; 3-second buy count correlated about 0.44, distinct trader count about 0.41, and sell count about 0.03. This is exploratory and strongly affected by the small sample and session composition; it is not a validated predictor.
+
+**Critical counterexample to a hard 3-second rule:** two eventual take-profit trades were still non-positive at 3 seconds. One Run 15 Gemini path did not first cross executable breakeven until about 25.78 seconds and ultimately finished positive. A hard 3-second loss/exit rule would have discarded a delayed winner. The data supports studying persistence and path shape, not applying a fixed early timeout.
+
+Run-level composition was very different: Run 15's 500ms lane had 8 TP, 2 SL and 1 time-cap record; Run 16 had 2 TP, 2 SL and 11 time-cap records. This is another reason not to pool the two sessions into a single claimed win-rate or infer a universal threshold.
+
 ### Run 16 time-cap path (exact curve quote analysis)
 
 Across the three flow-gated delay lanes:
@@ -377,16 +396,15 @@ PRs #9–35 were merged into main. Their purpose and scope are summarised here.
 
 PR #35 was squash-merged at commit `14077feca20312775b1c7353d2ffb353f8996e0f` on 2026-11-28 08:15:55 UTC.
 
-### Current unmerged work: PR #36
+### PR #36 — paired time-cap path diagnostics (merged)
 
-[PR #36 — paired time-cap path diagnostics](https://github.com/teddyjeremy/pumpfun-scalper/pull/36) adds observed transaction-price excursions before/after time-cap triggers. It is diagnostic only and explicitly treats extrema as market marks, not executable fills.
+[PR #36](https://github.com/teddyjeremy/pumpfun-scalper/pull/36) adds observed transaction-price excursions before/after time-cap triggers. It is diagnostic only and explicitly treats extrema as market marks, not executable fills. It was squash-merged at commit `e7afa05c9525f54e67f865d2ca927f51b58ab1c7` after CI passed.
 
-The first CI attempt failed because one test compared a floating-point result to -10.0 using exact equality. Review also found that post-trigger path selection used `slot >= trigger_slot`, which could incorrectly include an earlier transaction in the same slot. Both issues have been corrected on the PR branch:
-- Post-trigger extrema now start at the exact canonical trigger event index.
-- The floating-point assertion uses a tolerance.
-- The regression fixture now includes an earlier same-slot transaction to prevent recurrence.
+The first CI attempts exposed two issues:
+- A floating-point assertion compared -9.999999999999998 to -10.0 using exact equality; the test now uses a tolerance.
+- Post-trigger path selection originally used `slot >= trigger_slot`, which could include an earlier transaction in the same slot. The code now starts at the exact canonical trigger event index, and the regression fixture covers an earlier same-slot transaction.
 
-**Status at time of writing:** fixes pushed; CI must be confirmed green before PR #36 is merged. Do not use the diagnostic as an executable P&L model.
+Final PR #36 CI: **129 passed, 2 skipped** in both Python test and research replay workflows. Do not use observed extrema as executable P&L.
 
 ## 8. What we tested and should not repeat blindly
 
