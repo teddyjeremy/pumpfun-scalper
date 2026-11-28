@@ -116,3 +116,24 @@ The diagnostic implementation is being added in PR #38:
 - `curve_path_diagnostics.json` and `curve_path_diagnostics.md`
 
 The reprocessing workflow is extended to generate these outputs for the wallet-lock-plus-flow-gate latency lanes. Each latency remains a paired sensitivity variant, not an independent sample.
+
+
+### Latency-lane sensitivity (not pooled)
+
+The same path reconstruction was also checked in the 1.0s and 1.5s wallet-lock-plus-flow-gate lanes. These lanes overlap the 500ms mint set and are paired timing variants, so the rows below are sensitivity checks only.
+
+| Delay | Outcome label | Paths | Median external buy flow | Median external net flow | Median adverse sell pressure | Adverse sell recovery rate |
+|---|---|---:|---:|---:|---:|---:|
+| 0.5s | Take profit | 10 | 10.011 SOL | +6.860 SOL | 0.849% | 69.0% |
+| 0.5s | Stop loss | 4 | 2.797 SOL | -3.205 SOL | 2.526% | 23.1% |
+| 0.5s | Time cap | 12 | 0.672 SOL | +0.410 SOL | 0.121% | 60.9% |
+| 1.0s | Take profit | 9 | 7.983 SOL | +6.711 SOL | 0.996% | 51.8% |
+| 1.0s | Stop loss | 4 | 5.932 SOL | -4.890 SOL | 1.271% | 33.3% |
+| 1.0s | Time cap | 12 | 0.627 SOL | +0.214 SOL | 0.273% | 73.8% |
+| 1.5s | Take profit | 5 | 9.483 SOL | +6.768 SOL | 1.223% | 56.2% |
+| 1.5s | Stop loss | 5 | 7.583 SOL | -2.611 SOL | 1.615% | 46.4% |
+| 1.5s | Time cap | 7 | 0.408 SOL | +0.293 SOL | 0.545% | 71.4% |
+
+The most consistent descriptive distinction is **buy-flow scale and net flow**, not a single recovery-rate cutoff: time-cap paths have much smaller external buying and low net flow at every delay. Stop-loss paths show the strongest sell pressure in each delay variant. Take-profit paths show the strongest median net buying.
+
+The recovery rate itself is not monotonic by outcome: time-cap sell transactions often recover because the sell shocks are very small. This is why a recovery percentage alone would be a misleading strategy rule. The 1.5s sample is particularly small (17 paths) and must not be used to set a threshold.
