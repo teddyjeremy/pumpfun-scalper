@@ -126,7 +126,7 @@ def fetch_confirmed_block(
                 "encoding": "json",
                 "transactionDetails": "full",
                 "rewards": False,
-                "maxSupportedTransactionVersion": 0,
+                "maxSupportedTransactionVersion": 1,
             },
         ],
     }
