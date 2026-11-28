@@ -129,8 +129,11 @@ Two of the ten eventual take-profit trades were still below executable breakeven
 
 One Run 15 Gemini trade did not first cross executable breakeven until approximately **25.78 seconds**, yet it ultimately closed as a take-profit winner. The median first-positive time across take-profit trades was about **1.31 seconds**, but the range extended to approximately 25.78 seconds.
 
+Both delayed Run 15 Gemini winners were still negative at three seconds: approximately -$0.0472 and -$0.0503, with net SOL flow of only +0.158 and +0.076 SOL. Those values look very similar to the time-cap cohort's median 3-second quote (-$0.0472) and net flow (+$0.16 SOL). One first recovered at about 13.51 seconds and the other at about 25.78 seconds.
+
 Therefore:
 - A hard three-second stop would have discarded delayed winners.
+- A minimum three-second net-flow or executable-P&L threshold could also discard delayed winners that initially look like time-cap losers.
 - A single positive quote is not necessarily persistent momentum.
 - A negative quote at three seconds is not enough evidence to reject a position.
 - We need to study duration and persistence of recovery, not one checkpoint.
@@ -149,13 +152,14 @@ The entry gate currently distinguishes positive-flow transactions from non-posit
 
 Use the already captured Run 15 and Run 16 tapes to deepen the measurement before collecting a new sample.
 
-1. **Persistence:** calculate consecutive time spent below and above executable breakeven; record first crossing, last crossing, number of recrossings and longest positive run.
-2. **Acceleration / fade:** measure net SOL flow and reserve changes over rolling 1s, 2s, 3s and 5s windows, comparing changes in flow rate rather than only cumulative flow.
-3. **Curve efficiency:** compare net SOL flow with the executable curve P&L response. A large buy may produce less marginal benefit if the reserve/price path is already unfavourable.
-4. **Breadth quality:** compare unique buyers, repeated buys by the same wallets, and whether participation is broadening or narrowing. Do not repeat the old broad wallet-intelligence sweeps.
-5. **Counterexamples:** explicitly retain delayed winners such as the 25.78-second Gemini recovery. Any proposed early rejection rule must be tested against these.
-6. **Session robustness:** report Run 15 and Run 16 separately, then use a fresh observation as a locked out-of-sample validation.
-7. **No optimization yet:** do not select a 1s/2s/3s threshold from these 26 records. First establish whether a stable persistence/acceleration feature exists across sessions.
+1. **Landmark / no-lookahead comparison:** at 3s, 5s and 10s, include only positions whose original exit trigger has not yet fired. Never use transactions after the trigger as entry features. Report how many trades remain eligible at each landmark.
+2. **Persistence:** calculate consecutive time spent below and above executable breakeven; record first crossing, last crossing, number of recrossings and longest positive run.
+3. **Acceleration / fade:** measure net SOL flow and reserve changes over rolling 1s, 2s, 3s and 5s windows, comparing changes in flow rate rather than only cumulative flow.
+4. **Curve efficiency:** compare net SOL flow with the executable curve P&L response. A large buy may produce less marginal benefit if the reserve/price path is already unfavourable.
+5. **Breadth quality:** compare unique buyers, repeated buys by the same wallets, and whether participation is broadening or narrowing. Do not repeat the old broad wallet-intelligence sweeps.
+6. **Counterexamples:** explicitly retain delayed winners such as the 25.78-second Gemini recovery. Any proposed early rejection rule must be tested against these.
+7. **Session robustness:** report Run 15 and Run 16 separately, then use a fresh observation as a locked out-of-sample validation.
+8. **No optimization yet:** do not select a 1s/2s/3s threshold from these 26 records. First establish whether a stable persistence/acceleration feature exists across sessions.
 
 ## 12. Decision
 
