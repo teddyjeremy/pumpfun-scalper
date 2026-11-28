@@ -47,8 +47,11 @@ The following observation run numbers and statuses are verified from GitHub Acti
 
 | Run | Actions run ID | Started (UTC) | Status | Notes |
 |---:|---:|---|---|---|
+| 1 | 45761336129 | 2026-11-26 05:24 | Success | First small baseline observation. |
 | 2 | 45777883484 | 2026-11-26 07:46 | Success | Early baseline/multi-buyer evidence. |
 | 3 | 45802306493 | 2026-11-26 10:32 | Success | Second multi-buyer cohort observation. |
+| 4 | 45817882761 | 2026-11-26 12:15 | Success | Large baseline and multi-buyer portfolio comparison. |
+| 5 | 45838458774 | 2026-11-26 14:23 | Success | Transaction-complete multi-buyer research and one-position lane. |
 | 6 | 45854523569 | 2026-11-26 15:59 | Success | Included in Runs 6–8 retrospective high-conviction quality analysis. |
 | 7 | 45870046982 | 2026-11-26 17:42 | Success | Included in Runs 6–8 retrospective analysis. |
 | 8 | 45944405900 | 2026-11-27 05:12 | Success | Included in Runs 6–8 retrospective analysis. |
@@ -61,7 +64,7 @@ The following observation run numbers and statuses are verified from GitHub Acti
 | 15 | 46055823769 | 2026-11-27 19:19 | Failure | Observation workflow ended unsuccessfully; its data was later reprocessed where available. Do not treat it as a successful complete observation. |
 | 16 | 46116613167 | 2026-11-28 06:26 | Success | Latest complete observation in this register; 1,053 launches and 102,729 trade events. |
 
-Runs 1, 4, and 5 are referenced by earlier research/PR descriptions, but their complete metadata and full run-level metrics have not yet been consolidated into this register. Run #5 was the stated source of the high-conviction three-transaction hypothesis. Add exact records only after retrieving their original artifacts.
+Run 1, 4 and 5 report summaries were recovered from their original GitHub artifacts and are recorded below. The full raw artifacts remain available in Actions while their retention period lasts.
 
 ## 4. Strategy and hypothesis experiments
 
@@ -83,6 +86,30 @@ Runs 1, 4, and 5 are referenced by earlier research/PR descriptions, but their c
 - Median observed stop-loss market move was about -20.64%, materially worse than the configured -12% threshold.
 
 **Finding:** first non-creator buy alone is not a sufficient entry signal. The configured stop does not cap realized paper loss at -12%.
+
+### 4.1a Early observation results: Runs 1, 4 and 5
+
+These original report values are reserve-mark paper results, not exact curve-execution replay.
+
+| Run | Baseline trades | Baseline W/L | Baseline win rate | Baseline net P&L | Other findings |
+|---:|---:|---:|---:|---:|---|
+| 1 | 8 closed | 2/6 | 25.0% | -$0.5773 | 9 entries; 1 still open at shutdown; small initial sample. |
+| 4 | 301 | 126/175 | 41.9% | -$17.8034 | Independent shadow: 801 trades, -$46.2723. |
+| 5 | 324 | 156/168 | 48.1% | -$3.9356 | Independent shadow: 885 trades, -$23.2546. |
+
+Run 4 multi-buyer signal transaction lane:
+- 45 trades, 29W/16L, 64.4% win rate, +$4.0160.
+- One-position multi-buyer portfolio: 38 trades, 24W/14L, 63.2%, +$3.3925.
+- Portfolio capacity comparison: 1 concurrent 317 trades / -$20.8143; 3 concurrent 681 / -$36.2836; 5 concurrent 788 / -$45.2721.
+
+Run 5 transaction-complete and multi-buyer lanes:
+- Transaction-complete multi-buyer research: 106 trades, 77W/29L, 72.6%, +$14.9261.
+- Separate multi-buyer signal transaction research: 100 trades, 82W/18L, 82.0%, +$19.8261.
+- One-position multi-buyer portfolio: 94 trades, 78W/16L, 83.0%, +$19.3576.
+- The transaction summarizer recorded 133,196 per-mint transaction summaries, 267 multi-buyer transactions and 1,278 unique mints.
+- Portfolio capacity comparison: 1 concurrent 349 trades / -$4.1451; 3 concurrent 743 / -$17.8182; 5 concurrent 866 / -$22.9027.
+
+**Finding:** early multi-buyer transaction cohorts were consistently promising in Runs 2–5, while the broad first-buy baseline was negative. But these are early reserve-mark simulations with different lane definitions, before the later paired latency and exact curve execution audits. Their headline P&Ls must not be treated as production results or added to later lane P&Ls.
 
 ### 4.2 Multi-buyer signal transaction
 
