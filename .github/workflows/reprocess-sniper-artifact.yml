@@ -74,6 +74,7 @@ jobs:
         run: |
           test -s ./source/data/sniper_tape_sniper.jsonl
           test -s ./source/data/sniper_launches_sniper.jsonl
+          test -s ./source/data/sniper_transactions_sniper.jsonl
           test -s ./source/data/sniper_latency_0500ms_trades_sniper.jsonl
           test -s ./source/data/sniper_latency_1000ms_trades_sniper.jsonl
           test -s ./source/data/sniper_latency_1500ms_trades_sniper.jsonl
@@ -102,6 +103,23 @@ jobs:
           python -m scripts.sniper_curve_execution_replay \
             --data-dir ./source/data \
             --out ./source/report \
+            --sol-usd "${SOL_USD}" \
+            --tape-file sniper_tape_block_ordered_sniper.jsonl
+
+      - name: Replay paired latency, wallet-lock, and flow-gate variants
+        run: |
+          python -m scripts.paired_latency_replay \
+            --data-dir ./source/data \
+            --out ./source/report
+
+      - name: Curve-quote paired wallet-lock and flow-gate fills
+        env:
+          SOL_USD: ${{ inputs.sol_usd }}
+        run: |
+          python -m scripts.paired_latency_curve_replay \
+            --data-dir ./source/data \
+            --out ./source/report \
+            --paired-file ./source/report/paired_latency_replay.json \
             --sol-usd "${SOL_USD}" \
             --tape-file sniper_tape_block_ordered_sniper.jsonl
 
