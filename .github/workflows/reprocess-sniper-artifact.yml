@@ -96,6 +96,8 @@ jobs:
         run: python -m scripts.sniper_slot_order_reconstruction --data-dir ./source/data --out ./source/report
 
       - name: Replay latency lanes against the canonical tape
+        env:
+          SOL_USD: ${{ inputs.sol_usd }}
         run: |
           python scripts/sniper_curve_execution_replay.py \
             --data-dir ./source/data \
