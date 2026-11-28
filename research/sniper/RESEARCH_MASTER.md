@@ -115,7 +115,7 @@ This is evidence that the original baseline entry/exit model is not adequate. It
 
 ### 4.2 Multi-buyer signal was a promising early hypothesis, not a final answer
 
-Historical Runs #1/#2 of the sniper research (PR #12/#13 evidence; original run identifiers and artifact references should be maintained in the experiment register when available):
+Historical sessions cited in the PR #12/#13 evidence (observation run IDs 45777883484 and 45802306493):
 - Session 1: multi-buyer 74 trades, 42W/32L, +$10.9350; single-buyer 941 trades, 385W/556L, -$72.7593.
 - Session 2: multi-buyer 50 trades, 26W/24L, +$5.9981; single-buyer 810 trades, 328W/482L, -$53.2775.
 - Combined: multi-buyer 124 trades, 68W/56L, +$16.9331; single-buyer 1,751 trades, 713W/1,038L, -$126.0368.
