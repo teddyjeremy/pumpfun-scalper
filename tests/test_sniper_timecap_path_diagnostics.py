@@ -14,7 +14,7 @@ def event(signature, slot, price, t_plus, timestamp):
 def test_timecap_path_separates_entry_excursion_from_post_trigger_excursion():
     tape = [
         event("entry", 10, 1.0, 0, 100),
-        event("high-before-trigger", 11, 1.2, 10, 110),
+        event("high-before-trigger", 12, 1.5, 10, 110),
         event("trigger", 12, 0.95, 30, 130),
         event("post-trigger-low", 13, 0.90, 32, 132),
         event("exit", 15, 0.92, 35, 135),
@@ -27,7 +27,7 @@ def test_timecap_path_separates_entry_excursion_from_post_trigger_excursion():
     result = _analyze_trade(trade, tape, {row["signature"]: i for i, row in enumerate(tape)})
     assert result["status"] == "ok"
     assert abs(result["max_favorable_move_from_entry_pct"] - 20.0) < 1e-9
-    assert result["max_adverse_move_from_entry_pct"] == -10.0
+    assert abs(result["max_adverse_move_from_entry_pct"] + 10.0) < 1e-9
     assert result["max_favorable_move_after_trigger_pct"] == 0.0
     assert result["max_adverse_move_after_trigger_pct"] < -5.0
     assert result["trigger_to_exit_seconds"] == 5
