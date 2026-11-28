@@ -180,7 +180,7 @@ def build_report(data_dir: str, out_dir: str, paired_file: str) -> dict:
         "# Sniper time-cap path diagnostics",
         "",
         "Observed transaction price paths for paired curve-replay trades ending by time cap.",
-        "Intrapat h extrema are market marks, not executable fills. Lanes overlap and must not be added.",
+        "Intrapath extrema are market marks, not executable fills. Lanes overlap and must not be added.",
         "",
         "| Lane | Time-cap trades | Matched | Curve winners | Curve P&L | Median max favorable % | Median max adverse % | Median trigger-to-exit sec | Median slot gap |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
