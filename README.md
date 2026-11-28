@@ -13,6 +13,8 @@ Research project: a Pump.fun (Solana bonding-curve) quick-flip study, plus a dep
 
 The `feature/high-frequency-lane-k` branch adds Lane K, a 10-second buy-pressure entry setup, ahead of Lane B by default. It keeps the shared hard guards: launch-time window, $5k–$10k market-cap band, 300 cumulative trades, crash detection, creator-hold and create-slot-wallet rug checks. Lane K defaults to at least 4 trades and $25 buy volume in the last 10 seconds, with buy volume at least equal to sell volume. These are research parameters, not a claim of profitability. Paper mode remains the default; evaluate net results after fees, gas and fill delay before considering live use.
 
+[Sniper research register](research/SNIPER_RESEARCH_LOG.md): experiment history, run register, findings, execution-replay corrections, and next research plan.
+
 Layout:
 - `pumpbot/`: the bot (feed, tape/features, signals, engine, risk, pump.fun instruction builder, execution, journal).
 - `tests/`: unit tests. They use cached tapes when present and synthetic tapes otherwise.
