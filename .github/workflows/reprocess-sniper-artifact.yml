@@ -105,6 +105,13 @@ jobs:
             --sol-usd "${SOL_USD}" \
             --tape-file sniper_tape_block_ordered_sniper.jsonl
 
+      - name: Report decision-to-fill execution decay
+        run: |
+          python -m scripts.sniper_signal_fill_diagnostics \
+            --data-dir ./source/data \
+            --report-dir ./source/report \
+            --tape-file sniper_tape_block_ordered_sniper.jsonl
+
       - name: Upload reprocessed observation and replay reports
         if: always()
         uses: actions/upload-artifact@v4
