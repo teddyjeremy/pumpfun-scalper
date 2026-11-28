@@ -123,6 +123,15 @@ jobs:
             --sol-usd "${SOL_USD}" \
             --tape-file sniper_tape_block_ordered_sniper.jsonl
 
+      - name: Report transaction-boundary curve path and sell recovery diagnostics
+        run: |
+          python -m scripts.sniper_curve_path_diagnostics \
+            --data-dir ./source/data \
+            --curve-report ./source/report/paired_latency_curve_replay.json \
+            --out ./source/report \
+            --tape-file sniper_tape_block_ordered_sniper.jsonl \
+            --lane-suffix wallet_lock_flow_gate
+
       - name: Report paired time-cap transaction price paths
         run: |
           python -m scripts.sniper_timecap_path_diagnostics \
