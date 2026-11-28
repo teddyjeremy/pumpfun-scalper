@@ -80,7 +80,12 @@ def _analyze_trade(trade: dict, events: list[dict], index: dict[str, int]) -> di
 
     high = max(path, key=lambda row: float(row["price_sol"]))
     low = min(path, key=lambda row: float(row["price_sol"]))
-    post_trigger = [row for row in path if int(row.get("slot") or 0) >= int(trigger.get("slot") or 0)]
+    # Use canonical tape index, not slot >= trigger slot: earlier transactions
+    # in the same slot must not leak into the post-trigger excursion.
+    post_trigger = [
+        row for row in events[trigger_i:exit_i + 1]
+        if float(row.get("price_sol") or 0) > 0
+    ]
     post_high = max(post_trigger, key=lambda row: float(row["price_sol"]))
     post_low = min(post_trigger, key=lambda row: float(row["price_sol"]))
     entry_ts = int(entry.get("block_timestamp") or 0)
