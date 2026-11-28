@@ -56,7 +56,7 @@ This register records research families and material findings. It is intentional
 | Immediate vs next-slot curve quote | Exact curve quotes at immediate observation and later-slot boundary | Run16 all lanes negative; Run15 small samples positive | Use as execution sensitivity, not fill guarantee |
 | Same-slot integrity | Compare signal, entry, trigger and exit signature slots | 12 same-slot Run16 wallet-guard exits generated ~88% of reported lane profit | Same-slot exit marks cannot support promotion |
 | Time-cap path | Exact executable curve quotes before timer trigger and at actual delayed exit | Run16 only 2 of 13 unique time-cap mints ever positive before trigger; most losses predated exit delay | Shorter timer alone unlikely to solve it |
-| Early post-entry continuation | Early flow, trader breadth and executable curve progression by eventual outcome | Preliminary pattern: TP cohort stronger participation; time-cap group often weak/stalled; PoNZI delayed recovery warns against simplistic early stop | Next research priority; no thresholds |
+| Early post-entry continuation | Run15/Run16 500ms flow-gated paths; 26 trades / 26 unique mints | 8/10 TP paths positive by 3s vs 1/12 time-cap; median 3s curve P&L +$0.1200 vs -$0.0472; time-cap net flow often positive but much smaller. See EARLY_CONTINUATION_FINDINGS.md | Promising descriptive separation; no thresholds |
 
 ## C. Historical K/B research — separate from sniper
 
