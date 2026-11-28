@@ -23,7 +23,7 @@ The 500ms lane contains 26 trade records across two sessions:
 | Run 16 | 2 | 2 | 11 | 15 |
 | **Combined** | **10** | **4** | **12** | **26** |
 
-These are trade records, not 26 guaranteed unique mints. A mint can appear more than once after a prior position closes. The 500ms lane is separate from the 1s and 1.5s lanes.
+For this exact 500ms Run15/Run16 flow-gated sample, a direct mint-address check confirms 26 distinct mints (11 in Run15 and 15 in Run16). This uniqueness result applies only to this lane and these two sessions. The 500ms lane is separate from the 1s and 1.5s lanes.
 
 The initial executable curve mark after entry was approximately **-$0.0532** per $1 position under the replay's fee and gas assumptions. This entry deficit is why merely observing positive net flow is not enough.
 
@@ -164,3 +164,6 @@ Use the already captured Run 15 and Run 16 tapes to deepen the measurement befor
 ## 13. Decision
 
 **No strategy rule changes.** The next research focus is post-entry demand persistence and curve efficiency. The flow gate remains a research candidate, not a production rule. All results remain paper-only and counterfactual.
+
+
+Related follow-up: [Sniper Curve Absorption and Sell Recovery — Run15 / Run16](SNIPER_CURVE_ABSORPTION_2026-11-28.md) measures adverse sell pressure relative to local virtual SOL reserves and transaction-by-transaction recovery to the pre-sell curve spot. It is retrospective descriptive research, not an entry-time predictor.
