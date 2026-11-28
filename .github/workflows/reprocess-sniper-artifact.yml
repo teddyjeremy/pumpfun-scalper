@@ -99,7 +99,7 @@ jobs:
         env:
           SOL_USD: ${{ inputs.sol_usd }}
         run: |
-          python scripts/sniper_curve_execution_replay.py \
+          python -m scripts.sniper_curve_execution_replay \
             --data-dir ./source/data \
             --out ./source/report \
             --sol-usd "${SOL_USD}" \
