@@ -251,20 +251,41 @@ def build_report(data_dir, out_dir):
     rows = read_jsonl(os.path.join(data_dir, "sniper_transactions_sniper.jsonl"))
     rows.sort(key=lambda x: int(x.get("observation_sequence") or 0))
     variants = []
+    trade_details = {}
     for delay_ms in DELAYS_MS:
         delay = delay_ms / 1000
-        variants.extend([
-            replay_lane(rows, latency_seconds=delay, wallet_loss_guard=False,
-                        positive_entry_flow=False),
-            replay_lane(rows, latency_seconds=delay, wallet_loss_guard=True,
-                        positive_entry_flow=False),
-            replay_lane(rows, latency_seconds=delay, wallet_loss_guard=True,
-                        positive_entry_flow=True),
-        ])
+        lane_specs = [
+            ("no_wallet_lock", False, False),
+            ("wallet_lock", True, False),
+            ("wallet_lock_flow_gate", True, True),
+        ]
+        for lane_suffix, wallet_loss_guard, positive_entry_flow in lane_specs:
+            result = replay_lane(
+                rows, latency_seconds=delay,
+                wallet_loss_guard=wallet_loss_guard,
+                positive_entry_flow=positive_entry_flow,
+            )
+            variants.append(result)
+            trade_details[f"latency_{delay_ms}ms_{lane_suffix}"] = {
+                "entries": result["entries"],
+                "trades": result["trades"],
+                "open_position": result["open_position"],
+                "decisions": result["decisions"],
+                "locked_wallets": result["locked_wallets"],
+            }
     summaries = [summarize(x) for x in variants]
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "paired_latency_replay.json"), "w", encoding="utf-8") as f:
-        json.dump({"input_transactions": len(rows), "lanes": summaries}, f, indent=2)
+        json.dump({
+            "input_transactions": len(rows),
+            "lanes": summaries,
+            "trade_details": trade_details,
+            "trade_detail_semantics": (
+                "Per-lane paired replay paths. Each trade's entry_signature and "
+                "exit_signature are the selected delayed transaction marks; "
+                "exit_trigger_signature records the earlier TP/SL/time-cap trigger."
+            ),
+        }, f, indent=2)
 
     lines = [
         "# Paired latency, wallet-lock, and post-signal flow replay", "",
