@@ -407,6 +407,14 @@ PoNZI's best observed curve quote was about +$0.1278 around 25 seconds after ent
 
 **Finding:** shortening the time cap alone is unlikely to repair the main failure mode. The majority of these positions never reached positive executable curve value before the timer trigger.
 
+### Transaction-level curve absorption and sell recovery
+
+A separate Run15/Run16 analysis now measures the reserve-normalized size of each adverse sell transaction and whether later complete transactions recover the pre-sell curve spot. Full details and paired-delay sensitivity are in [Sniper Curve Absorption and Sell Recovery](SNIPER_CURVE_ABSORPTION_2026-11-28.md).
+
+For the 500ms wallet-lock + flow-gate lane, 26 trade paths represent 26 distinct mints (11 in Run15, 15 in Run16). All final quotes reconcile exactly to PR35 curve replay. Median adverse sell pressure/local virtual SOL reserve was 2.526% for stop-loss paths, 0.849% for take-profit paths, and 0.121% for time-cap paths. The corresponding median transaction spot moves were -4.991%, -1.692%, and -0.241%; adverse sell transactions recovered pre-sell spot before exit in 23.1%, 69.0%, and 60.9% of cases respectively.
+
+The interpretation is that stop-loss paths show materially stronger sell-pressure deterioration, while time-cap paths more often stall with very low buying rather than suffer a large sell shock. Recovery rate alone is not a rule: time-cap sells often recover because they are small. The 153 adverse sell transactions are nested within 26 mints, and the paths extend through delayed fills, so these are retrospective descriptive results, not independent predictive samples. The 1.0s/1.5s variants are paired sensitivity checks, not extra independent observations.
+
 ## 7. Engineering/replay PR register
 
 PRs #9–35 were merged into main. Their purpose and scope are summarised here.
