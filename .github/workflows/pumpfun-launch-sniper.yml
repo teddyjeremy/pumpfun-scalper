@@ -115,7 +115,7 @@ jobs:
         if: always()
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
-        run: python scripts/sniper_slot_order_reconstruction.py --data-dir ./data --out ./report
+        run: python -m scripts.sniper_slot_order_reconstruction --data-dir ./data --out ./report
 
       - name: Upload sniper observation
         if: always()
