@@ -323,11 +323,13 @@ A diagnostic CSV was generated for the flow-gated wallet-lock lane at 0.5s, 1.0s
 | Stop loss | 4 | -2.54 SOL | 5.5 | 5.5 | 6 | -$0.1683 |
 | Time cap | 12 | +0.16 SOL | 5.5 | 0.5 | 5 | -$0.0472 |
 
-The immediate executable quote after entry was approximately -$0.0532 for each trade under this cost model. Take-profit trades generally recovered that initial deficit through stronger buying and broader participation. Time-cap trades generally did not, despite modest positive net flow.
+The immediate executable quote after entry was approximately -$0.0532 for each trade under this cost model. The table describes the full selected entry-to-fill path, not necessarily the first three seconds before the exit decision.
 
-**Interpretation:** the existing gate checks that a qualifying buy-flow transaction exists at entry. It does not ensure that meaningful buying participation continues after entry. A stall/weak-follow-through category may be important.
+**Important timing correction:** 8/10 take-profit triggers and all 4/4 stop-loss triggers occurred at or before three seconds after entry; all 12 time-cap triggers occurred 24–30 seconds after entry. Therefore, the 3-second TP/SL flow and quote figures include post-trigger activity for most of those trades. They are not a fair early-entry predictor comparison. The time-cap 3-second observations are pre-trigger; most TP/SL observations are not.
 
-**Caution:** these are small groups (especially four stop-loss trades), selected by eventual exit outcome. The table is descriptive, not a causal or validated predictive filter. Do not use these medians as thresholds.
+**Interpretation:** the entry gate checks that a qualifying buy-flow transaction exists at entry. It does not ensure that meaningful buying participation continues. But no early flow threshold is justified by this outcome-selected sample.
+
+**Caution:** these are small groups (especially four stop-loss trades), selected by eventual exit outcome. The 3-second checkpoint series and the Spearman correlations below include post-trigger path observations for many TP/SL trades. They are not entry-time predictive features. Do not use these medians or correlations as thresholds.
 
 ### Additional first-30-second follow-through findings (500ms flow-gated lane)
 
@@ -342,11 +344,27 @@ Using the 26 trade records in the 500ms wallet-lock + flow-gate lane across Runs
 | 15s | 9/10 | 0/4 | 1/12 |
 | 30s | 10/10 | 0/4 | 1/12 |
 
-For these same 26 records, Spearman correlation with final curve-replay P&L was approximately 0.76 for 3-second executable P&L and 0.76 for 3-second net SOL flow; 3-second buy count correlated about 0.44, distinct trader count about 0.41, and sell count about 0.03. This is exploratory and strongly affected by the small sample and session composition; it is not a validated predictor.
+For these same 26 records, Spearman correlation with final curve-replay P&L was approximately 0.76 for 3-second executable P&L and 0.76 for 3-second net SOL flow; 3-second buy count correlated about 0.44, distinct trader count about 0.41, and sell count about 0.03. Because most TP/SL exit triggers already occurred by three seconds, these correlations include post-decision information. They are not valid entry-time predictor evidence.
 
 **Critical counterexample to a hard 3-second rule:** two eventual take-profit trades were still non-positive at 3 seconds. One Run 15 Gemini path did not first cross executable breakeven until about 25.78 seconds and ultimately finished positive. A hard 3-second loss/exit rule would have discarded a delayed winner. The data supports studying persistence and path shape, not applying a fixed early timeout.
 
 Run-level composition was very different: Run 15's 500ms lane had 8 TP, 2 SL and 1 time-cap record; Run 16 had 2 TP, 2 SL and 11 time-cap records. This is another reason not to pool the two sessions into a single claimed win-rate or infer a universal threshold.
+
+### Trigger-aligned curve quote results (500ms lane)
+
+The exact curve path was split at the original `exit_trigger_signature`. The quote at the trigger is distinct from the delayed exit-fill quote.
+
+| Outcome | n | Median executable P&L at trigger | Positive at trigger | Median P&L at delayed fill | Median trigger-to-fill wait |
+|---|---:|---:|---:|---:|---:|
+| Take profit | 10 | +$0.1788 | 10/10 | +$0.2254 | 1s |
+| Stop loss | 4 | -$0.1910 | 0/4 | -$0.1966 | 0.5s |
+| Time cap | 12 | -$0.0398 | 1/12 | -$0.0375 | 6.5s |
+
+The time-cap trigger-to-fill wait reached 33 seconds in one trade (integer block timestamp resolution). TP and stop-loss trigger-to-fill waits were at most one second in this sample.
+
+Before the trigger, 10/10 TP paths reached positive executable curve P&L, 0/4 SL paths did, and only 1/12 time-cap paths did. The median best pre-trigger quote was +$0.1788 (TP), -$0.0509 (SL), and -$0.0338 (time cap). Eleven of twelve time-cap paths never recovered to executable breakeven before the timer trigger. VOW was the single positive time-cap exception, reaching approximately +$0.0764.
+
+This trigger-aligned split is the valid decision-versus-fill comparison. It shows that most timer losses were already negative when the timer fired; delayed exit fill was generally secondary.
 
 ### Run 16 time-cap path (exact curve quote analysis)
 
